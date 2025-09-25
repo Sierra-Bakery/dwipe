@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-""" TBD
-
-
+"""
+dwipe: curse based tool to wipe physical disks or partitions including
+  markers to know their state when wiped.
 """
 # pylint: disable=too-many-branches,too-many-statements,import-outside-toplevel
 # pylint: disable=too-many-instance-attributes,invalid-name
@@ -290,6 +290,7 @@ class DeviceInfo:
             entry.fstype = device.get('fstype', '')
             if entry.fstype is None:
                 entry.fstype = ''
+            entry.type = device.get('type', '')
             entry.label = device.get('label', '')
             if not entry.label:
                 entry.label=device.get('partlabel', '')
@@ -319,7 +320,7 @@ class DeviceInfo:
 
                # Run the `lsblk` command and get its output in JSON format with additional columns
         result = subprocess.run(['lsblk', '-J', '--bytes', '-o',
-                    'NAME,MAJ:MIN,FSTYPE,LABEL,PARTLABEL,FSUSE%,SIZE,MOUNTPOINTS', ],
+                    'NAME,MAJ:MIN,FSTYPE,TYPE,LABEL,PARTLABEL,FSUSE%,SIZE,MOUNTPOINTS', ],
                     stdout=subprocess.PIPE, text=True, check=False)
         parsed_data = json.loads(result.stdout)
         entries = {}
@@ -413,47 +414,10 @@ class DeviceInfo:
 
     def get_disk_partitions(self, nss):
         """ Determine which partitions we want some are bogus like zram """
-
-        def whitelisted(device_name):
-            """Check if device_name matches any pattern in whitelist
-            which are the disk devices."""
-            WHITELIST = ['nvme*', 'sd*', 'hd*', 'mmcblk*']
-            for pattern in WHITELIST:
-                if fnmatch(device_name, pattern):
-                    return True
-            return False
-
-        def blacklisted(device_name):
-            """Check if device_name matches any pattern in black list
-              which are know not to be physical disks."""
-            BLACKLIST = ['zram*', 'ram*', 'dm-*', 'loop*', 'sr*']
-            for pattern in BLACKLIST:
-                if fnmatch(device_name, pattern):
-                    return 'blkLst'
-            return ''
-
-        def writable(device_name):
-            """Check if the device is writable."""
-            device_path = f'/dev/{device_name}'
-            try: # Check if the device file exists and is writable
-                return os.access(device_path, os.W_OK)
-            except FileNotFoundError:
-                return False
-
         ok_nss = {}
         for name, ns in nss.items():
-            if ns.major in self.disk_majors or whitelisted(name):
+            if ns.type in ('disk', 'part'):
                 ok_nss[name] = ns
-                continue
-            if blacklisted(name):
-                continue
-            if writable(name):
-                if self.DB:
-                    print(r'DB:include {repr(name)} [not white/black but writable]')
-                ok_nss[name] = ns
-                continue
-            if self.DB:
-                print(r'DB:exclude {repr(name)} [not white/black but unwritable]')
         return ok_nss
 
     def compute_field_widths(self, nss):
@@ -858,7 +822,8 @@ class DiskWipe:
                         partition.state = pct
                         partition.mounts = [f'{elapsed} {rate} REM:{until}']
 
-                    if partition.parent and self.partitions[partition.parent].state == 'Lock':
+                    if partition.parent and partition.parent in self.partitions and (
+                            self.partitions[partition.parent].state == 'Lock'):
                         continue
 
                     if wanted(name) or partition.job:
