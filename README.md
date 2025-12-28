@@ -1,6 +1,30 @@
 # dwipe
 `dwipe` is a tool to wipe disks and partitions for Linux to help secure your data. `dwipe` aims to reduce mistakes by providing ample information about your devices during selection.
 
+### Quick Comparison
+
+| Feature | dwipe | nwipe | shred | dd |
+|---------|-------|-------|-------|-----|
+| Interactive TUI | ✓ | ✓ | ✗ | ✗ |
+| Multiple simultaneous wipes | ✓ | ✗ | ✗ | ✗ |
+| Hot-swap detection | ✓ | ✗ | ✗ | ✗ |
+| Device/partition locking | ✓ | ✗ | ✗ | ✗ |
+| Persistent wipe state | ✓ | ✗ | ✗ | ✗ |
+| Wipe operation logging | ✓ | ✗ | ✗ | ✗ |
+| Mount detection/prevention | ✓ | ✓ | ✗ | ✗ |
+| Multi-pass wipe standards | ✗ | ✓ | ✓ | ✗ |
+| Verification passes | ✗ | ✓ | ✓ | ✗ |
+| Certificate generation | ✗ | ✓ | ✗ | ✗ |
+
+## **V2 Features**
+
+* **Persistent user preferences** - Theme, wipe mode (random/zeros), and locked devices now persist across sessions (saved to `~/.config/dwipe/state.json`)
+* **Individual partition locking** - Lock individual partitions to prevent accidental wiping (previously only whole disks could be locked)
+* **Full terminal color themes** - Complete themed color schemes with backgrounds, not just highlights (cycle with **t** key)
+* **Visual feedback improvements** - Mounted and locked devices appear dimmed for better visual distinction from available devices
+* **Smart device identification** - Uses UUID/PARTUUID/serial numbers for stable device tracking across reconnections
+* **Wipe operation logging** - All wipe operations (completed and stopped) are logged to `~/.config/dwipe/wipe.log` with timestamps, device info, and completion status
+
 ## Requirements
 - **Linux operating system** (uses `/dev/`, `/sys/`, `/proc/` interfaces)
 - **Python 3.8 or higher**
@@ -71,6 +95,32 @@ dwipe
 - `--dry-run` or `-n` - Practice mode: test the interface without actually wiping devices
 - `--debug` or `-D` - Debug mode (can be repeated for higher verbosity: `-DD`, `-DDD`)
 
+### Color Themes
+
+`dwipe` supports multiple color themes for improved visibility and aesthetics. Colors provide visual warnings (yellow for stopped wipes, red for destructive operations).
+
+**Available themes:**
+- `default` - Terminal Default (basic ANSI colors)
+- `solarized-dark` - Solarized Dark palette
+- `solarized-light` - Solarized Light palette (for light terminal backgrounds)
+- `gruvbox` - Gruvbox Dark palette
+- `nord` - Nord palette
+
+**Set theme using environment variable:**
+```bash
+export DWIPE_THEME=solarized-dark
+dwipe
+
+# Or inline:
+DWIPE_THEME=gruvbox dwipe
+DWIPE_THEME=nord dwipe --dry-run
+```
+
+**Theme features:**
+- Yellow/warning color for stopped wipes (state **s**) - highly visible even when not selected
+- Red/danger color for wipe confirmation prompts
+- Coordinated color palettes designed for terminal readability
+
 Here is a typical screen:
 
 ![dwipe-help](https://raw.githubusercontent.com/joedefen/dwipe/master/resources/dwipe-main-screen.png?raw=true)
@@ -106,6 +156,7 @@ The top line shows available actions. Some are context-sensitive (only available
 | **/** | filter | Filter devices by regex pattern (shows matching devices + all active wipes) |
 | **ESC** | clear filter | Clear the filter and jump to top of list |
 | **r** | toggle mode | Toggle between Random and Zeros wipe modes |
+| **t** | cycle theme | Cycle through color themes (default, solarized-dark, solarized-light, gruvbox, nord) |
 
 ### Wipe Modes
 
