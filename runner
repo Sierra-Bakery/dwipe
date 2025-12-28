@@ -1,0 +1,6 @@
+#!/bin/bash
+# runner - Run dwipe from source directory
+# Automatically uses the .venv Python interpreter
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$DIR/.venv/bin/python" -m dwipe.main "$@"
