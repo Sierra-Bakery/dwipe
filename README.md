@@ -138,6 +138,13 @@ DWIPE_THEME=gruvbox dwipe
 DWIPE_THEME=nord dwipe --dry-run
 ```
 
+**Changing themes:**
+- Press **t** from the main screen to open the theme preview screen
+- The theme screen shows color examples for each color purpose (DANGER, SUCCESS, WARNING, etc.)
+- Press **t** while on the theme screen to cycle through available themes and preview them live
+- Press **ESC** or **ENTER** to return to the main screen
+- Selected theme is saved and persists across sessions
+
 **Theme features:**
 - Yellow/warning color for stopped wipes (state **s**) - highly visible even when not selected
 - Red/danger color for wipe confirmation prompts
@@ -178,7 +185,7 @@ The top line shows available actions. Some are context-sensitive (only available
 | **/** | filter | Filter devices by regex pattern (shows matching devices + all active wipes) |
 | **ESC** | clear filter | Clear the filter and jump to top of list |
 | **r** | toggle mode | Toggle between Random and Zeros wipe modes |
-| **t** | cycle theme | Cycle through color themes (default, dark-mono, light-mono, solarized-dark, solarized-light, gruvbox, nord) |
+| **t** | themes | Open theme preview screen to view and change color themes |
 
 ### Wipe Modes
 
