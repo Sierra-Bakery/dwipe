@@ -19,8 +19,13 @@
 
 ## **V2 Features**
 
-* **Statistical sampling verification** - Automatic or on-demand verification using smart sampling (divides disk into 100 sections, randomly samples configurable % of each section for full coverage). Supports zeros and random data pattern detection via statistical analysis
+* **Advanced statistical verification** - Automatic or on-demand verification with intelligent pattern detection:
+  - Fast-fail for zeros (fails on first non-zero byte)
+  - Chi-squared test for random data at 99% confidence level
+  - Smart sampling: divides disk into 100 sections, randomly samples each section for complete coverage
+  - Unmarked disk detection: can verify disks without filesystems and auto-detect if zeros/random
 * **Configurable verification percentage** - Choose thoroughness: 0% (skip), 2%, 5%, 10%, 25%, 50%, or 100% (cycle with **V** key, persistent preference)
+* **Multi-pass wipe support** - Choose 1, 2, or 4 wipe passes (cycle with **P** key, persistent preference)
 * **Inline wipe confirmation** - Confirmation prompts appear below the selected device (no popup), keeping full context visible
 * **Configurable confirmation modes** - Choose your safety level: single keypress (Y/y), typed confirmation (YES/yes), or device name (cycle with **c** key)
 * **Enhanced wipe history** - Detailed log viewer (**h** key) shows wipe history with UUIDs, filesystems, labels, and percentages for stopped wipes
@@ -108,9 +113,10 @@ dwipe
 
 - **Dimmed (gray)** - Mounted or locked devices (cannot be wiped)
 - **Default (white)** - Ready to wipe, idle state, or previously wiped (before this session)
-- **Bright cyan/blue + bold** - Active wipe or verification in progress (0-100% write, 101-200% verify)
+- **Bright cyan/blue + bold** - Active wipe or verification in progress (0-100% write, v0-v100% verify)
 - **Bold yellow** - Stopped or partially completed wipe
 - **Bold green** - ✅ Successfully completed wipe in THIS session (ready to swap out!)
+- **Bold orange** - Newly inserted (hot-swapped) device
 - **Bold red** - Destructive operation prompts (wipe confirmation)
 
 ### Color Themes
@@ -163,10 +169,11 @@ The **STATE** column shows the current status of each device:
 | **-** | Device is ready for wiping |
 | **^** | Device is ready for wiping AND was added after `dwipe` started (hot-swapped) |
 | **Mnt** | Partition is mounted or disk has mounted partitions - cannot be wiped |
-| **N%** | Wipe is in progress (shows percentage complete) |
-| **STOP** | Wipe is being stopped |
-| **s** | Wipe was stopped - device is partially wiped (can restart) |
-| **W** | Wipe was completed successfully (can wipe again) |
+| **N%** | Wipe is in progress (shows percentage complete, 0-100%) |
+| **vN%** | Verification is in progress (shows percentage complete, v0-v100%) |
+| **STOP** | Wipe or verification is being stopped |
+| **s** | Wipe was stopped - device is partially wiped (can restart or verify) |
+| **W** | Wipe was completed successfully (can wipe again or verify) |
 | **Lock** | Disk is manually locked - partitions are hidden and cannot be wiped |
 | **Unlk** | Disk was just unlocked (transitory state) |
 
@@ -177,22 +184,65 @@ The top line shows available actions. Some are context-sensitive (only available
 | Key | Action | Description |
 |-----|--------|-------------|
 | **w** | wipe | Wipe the selected device (requires confirmation) |
+| **v** | verify | Verify a wiped device or detect pattern on unmarked disk (context-sensitive) |
 | **s** | stop | Stop the selected wipe in progress (context-sensitive) |
 | **S** | Stop All | Stop all wipes in progress |
 | **l** | lock/unlock | Lock or unlock a disk to prevent accidental wiping |
 | **q** or **x** | quit | Quit the application (stops all wipes first) |
 | **?** | help | Show help screen with all actions and navigation keys |
+| **h** | history | Show wipe history log |
 | **/** | filter | Filter devices by regex pattern (shows matching devices + all active wipes) |
 | **ESC** | clear filter | Clear the filter and jump to top of list |
-| **r** | toggle mode | Toggle between Random and Zeros wipe modes |
+| **m** | mode | Toggle between Rand and Zero wipe modes (saved as preference) |
+| **P** | passes | Cycle wipe passes: 1, 2, or 4 (saved as preference) |
+| **V** | verify % | Cycle verification percentage: 0%, 2%, 5%, 10%, 25%, 50%, 100% (saved as preference) |
+| **c** | confirmation | Cycle confirmation mode: Y, y, YES, yes, device name (saved as preference) |
+| **D** | dense | Toggle dense/spaced view (saved as preference) |
 | **t** | themes | Open theme preview screen to view and change color themes |
 
 ### Wipe Modes
 
-`dwipe` supports two wipe modes (toggle with **r** key):
+`dwipe` supports two wipe modes (toggle with **m** key):
 
-- **Random** - Fills the device with random data, then zeros the first 16KB (which contains the wipe metadata)
-- **Zeros** - Fills the device with zeros (may be faster on some devices due to optimization)
+- **Rand** - Fills the device with random data, then zeros the first 16KB (which contains the wipe metadata)
+- **Zero** - Fills the device with zeros (may be faster on some devices due to optimization)
+
+### Verification Strategy
+
+`dwipe` uses intelligent verification with statistical analysis and fast-fail optimizations:
+
+**Smart Sampling:**
+- Divides disk into 100 equal sections
+- Randomly samples configurable percentage (0%, 2%, 5%, 10%, 25%, 50%, 100%) from EACH section
+- Ensures complete disk coverage even with 2% verification
+- Change verification percentage with **V** key (saved as preference)
+
+**Pattern Detection:**
+- **Zero verification**: Fails immediately on first non-zero byte (fast!)
+- **Random verification**: Uses chi-squared statistical test at 99% confidence level
+  - Tests if byte distribution is truly uniform (all byte values 0-255 appear equally)
+  - Fast-fails every 1MB if non-random pattern detected
+  - Critical value: χ² > 310 = not random (rejects null hypothesis)
+  - Critical value: χ² < 310 = random (accepts null hypothesis)
+
+**Verification Modes:**
+1. **Automatic verification** (after wipe): Set verify % > 0, verification runs after wipe completes
+2. **Manual verification** (press **v**): Verify previously wiped devices or detect pattern on unmarked disks
+3. **Unmarked disk detection**: Can verify disks with no filesystem to detect if all zeros or random
+   - If passes, writes marker as if disk had been wiped
+   - Useful for detecting pre-wiped drives or verifying manufacturer erasure
+
+**Verification States:**
+- ✓ (green checkmark) - Verification passed
+- ✗ (red X) - Verification failed
+- No symbol - Not verified
+- During verify: **vN%** shows progress (v0% to v100%)
+
+**Why statistical sampling is better than sequential:**
+- 2% verification with 100 sections provides better coverage than 2% sequential read
+- Detects problems faster (could hit bad sector in early sections)
+- Statistical analysis actually validates randomness (sequential can't do this)
+- Much faster than 100% sequential verification
 
 ### Progress Information
 
@@ -207,9 +257,11 @@ When wiping a device, `dwipe` displays:
 
 The **W** (wiped) and **s** (partially wiped) states are persistent across reboots. This is achieved by writing metadata to the first 16KB of the device:
 - First 15KB: zeros
-- Next 1KB: JSON metadata (timestamp, bytes written, total size, mode)
+- Next 1KB: JSON metadata (timestamp, bytes written, total size, mode, verification status)
 
-When a device with persistent state is displayed, additional information shows when it was wiped and the completion percentage.
+When a device with persistent state is displayed, additional information shows:
+- When it was wiped and the completion percentage
+- Verification status: ✓ (passed), ✗ (failed), or no symbol (not verified)
 
 
 ### The Help Screen
@@ -331,7 +383,9 @@ MIT License - see [LICENSE](LICENSE) file for details.
 3. Statistical verification - Smarter than full sequential reads:
 * 2% verification samples the ENTIRE disk (100 sections)
 * Finds problems faster than sequential (could hit bad sector early)
-* Statistical analysis actually detects random vs zeros vs unwiped
+* Fast-fail optimizations: zeros fail on first non-zero byte, random fails every 1MB if pattern detected
+* Chi-squared test at 99% confidence actually validates true randomness
+* Can detect pattern on unmarked disks (auto-detect zeros/random, writes marker if passes)
 * Way faster than 100% sequential
 4. Safety without sacrificing speed:
 * Persistent state (survive crashes/reboots)
