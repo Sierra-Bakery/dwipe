@@ -13,11 +13,11 @@ import shutil
 import curses as cs
 from types import SimpleNamespace
 from .ConsoleWindow import (ConsoleWindow, ConsoleWindowOpts, OptionSpinner,
-                            IncrementalSearchBar,
-                            COLOR_DANGER, COLOR_SUCCESS, COLOR_WARNING, COLOR_INFO,
-                            COLOR_EMPHASIS, COLOR_ERROR, COLOR_PROGRESS, COLOR_HOTSWAP,
-                            list_themes, get_current_theme, set_theme,
-                            Screen, ScreenStack, THEMES, Context)
+            IncrementalSearchBar,
+            COLOR_DANGER, COLOR_SUCCESS, COLOR_OLD_SUCCESS,
+            COLOR_WARNING, COLOR_INFO, COLOR_EMPHASIS, COLOR_ERROR, COLOR_PROGRESS, COLOR_HOTSWAP,
+            list_themes, get_current_theme, set_theme,
+            Screen, ScreenStack, THEMES, Context)
 
 from .WipeJob import WipeJob
 from .DeviceInfo import DeviceInfo
@@ -919,6 +919,7 @@ class ThemeScreen(DiskWipeScreen):
         color_labels = [
             (COLOR_DANGER, 'DANGER', 'Destructive operations (wipe prompts)'),
             (COLOR_SUCCESS, 'SUCCESS', 'Completed operations'),
+            (COLOR_OLD_SUCCESS, 'OLD_SUCCESS', 'Older Completed operations'),
             (COLOR_WARNING, 'WARNING', 'Caution/stopped states'),
             (COLOR_INFO, 'INFO', 'Informational states'),
             (COLOR_EMPHASIS, 'EMPHASIS', 'Emphasized text'),

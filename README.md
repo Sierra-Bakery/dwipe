@@ -1,6 +1,7 @@
 # dwipe
 `dwipe` is a tool to wipe disks and partitions for Linux to help secure your data. `dwipe` aims to reduce mistakes by providing ample information about your devices during selection.
 
+![Demo of dwipe](https://raw.githubusercontent.com/jdoe/my-project/main/images/dwipe-2025-12-31-09-37.gif)
 ### Quick Comparison
 
 | Feature | dwipe | nwipe | shred | dd |
@@ -13,18 +14,20 @@
 | Resume interrupted wipes | ✓ | ✗ | ✗ | ✗ |
 | Wipe operation logging | ✓ | ✗ | ✗ | ✗ |
 | Mount detection/prevention | ✓ | ✓ | ✗ | ✗ |
-| Statistical sampling verification | ✓ | ✗ | ✗ | ✗ |
-| Intelligent dirty page throttling | ✓ | ✗ | ✗ | ✗ |
+| Fast Statistical sampling verification | ✓ | ✗ | ✗ | ✗ |
 | Multi-pass wipe standards | ✗ | ✓ | ✓ | ✗ |
-| Full sequential verification | ✗ | ✓ | ✓ | ✗ |
+| Full sequential verification | ✗ | ✓ | ✓ | ✓ |
 | Certificate generation | ✗ | ✓ | ✗ | ✗ |
+
+> * **Modern drives are reliably wiped with one pass of zeros**; just zero once in almost all cases for best, fastest results.
+> * `dwipe` offers Multi-pass and Rand modes as "checkbox" features, but those provide no additional security on drives manufactured after 2001 (NIST SP 800-88).
 
 ## **V2 Features**
 
-* **Advanced statistical verification** - Automatic or on-demand verification with intelligent pattern detection:
+* **Statistical verification** - Automatic or on-demand verification with intelligent pattern detection:
   - Fast-fail for zeros (fails on first non-zero byte)
   - Statistical analysis for random data to check for evidence of randomness
-  - Smart sampling: divides disk into 100 sections, randomly samples each section for complete coverage
+  - Smart sampling: divides disk into 100 sections, randomly samples each section to sample entire disk
   - Unmarked disk detection: can verify disks without filesystems and auto-detect if zeros/random
 * **Configurable verification percentage** - Choose thoroughness: 0% (skip), 2%, 5%, 10%, 25%, 50%, or 100% (cycle with **V** key, persistent preference)
 * **Multi-pass wipe support** - Choose 1, 2, or 4 wipe passes with alternating patterns for improved data destruction (cycle with **P** key, persistent preference)
@@ -38,7 +41,8 @@
 * **Visual feedback improvements** - Mounted and locked devices appear dimmed; active wipes are bright and prominent
 * **Smart device identification** - Uses UUID/PARTUUID/serial numbers for stable device tracking across reconnections
 * **Screen-based navigation** - Modern screen stack architecture with help screen (**?**) and history screen (**h**)
-* **Intelligent dirty page throttling** - Monitors kernel dirty pages and throttles writes to prevent RAM exhaustion and surprise flush delays (configurable 0/500/1000/2000/4000 MB limit, cycle with **d** key)
+* **Direct I/O to Disk** - Wiping is done with direct I/O which is fast and avoid polluting your page cache. Writer threads are given lower than normal I/O priority to play nice with other apps.  This makes stopping jobs fast and certain.
+* **Improved Handling of Bad Disks.** Now detects (sometimes corrects) write failures, slowdowns, excessive no progress, and reports/aborts hopeless or hopelessly slow wipes.
 
 ## Requirements
 - **Linux operating system** (uses `/dev/`, `/sys/`, `/proc/` interfaces)
@@ -48,35 +52,13 @@
 
 ## Installation
 
-**Recommended (using pipx):**
-```bash
-pipx install dwipe
-```
-
-**Alternative methods:**
-```bash
-# Using pip
-pip install dwipe
-
-# From source
-git clone https://github.com/joedefen/dwipe
-cd dwipe
-pip install .
-```
-
-**Verify installation:**
-```bash
-dwipe --help
-```
-
-**Uninstall:**
-```bash
-pipx uninstall dwipe  # or: pip uninstall dwipe
-```
+* **Recommended (using pipx):** `pipx install dwipe`
+* **Verify installation:** `dwipe --help`
+* **Uninstall:** `pipx uninstall dwipe`
 
 ## Quick Start
-1. Install `dwipe` using one of the methods above
-2. Run `dwipe` from a terminal (sudo will be requested automatically)
+1. Install `dwipe`
+2. Run `dwipe` from a terminal (`sudo` will be requested automatically)
 3. Observe the context-sensitive help on the first line
 4. Navigate with arrow keys or vi-like keys (j/k)
 5. Press **?** for full help screen
@@ -96,21 +78,12 @@ pipx uninstall dwipe  # or: pip uninstall dwipe
 * **Disk locking** - Manually lock disks to prevent accidental wipes (locks hide all partitions)
 * **Dry-run mode** - Practice using the interface without risk using `--dry-run`
 
-> **Recommendation:** Modern drives can be reliably wiped with one pass of zeros; use those settings in almost all cases for best, fastest results. Multi-pass and Rand modes exist only to satisfy outdated compliance requirements or for peace of mind, but provide no additional security on drives manufactured after 2001 (NIST SP 800-88).
 
 > **Note:** `dwipe` shows file system labels, and if not available, the partition label. It is best practice to label partitions and file systems well to make selection easier.
   
 ## Usage
 
-Simply run `dwipe` from the command line without arguments:
-
-```bash
-dwipe
-```
-
-**Command-line options:**
-- `--dry-run` or `-n` - Practice mode: test the interface without actually wiping devices
-- `--debug` or `-D` - Debug mode (can be repeated for higher verbosity: `-DD`, `-DDD`)
+Simply run `dwipe` from the command line without arguments: `dwipe`
 
 ### Color Legend
 
@@ -121,6 +94,7 @@ dwipe
 - **Bright cyan/blue + bold** - Active wipe or verification in progress (0-100% write, v0-v100% verify)
 - **Bold yellow** - Stopped or partially completed wipe
 - **Bold green** - ✅ Successfully completed wipe in THIS session (ready to swap out!)
+- **Dimmer green** - ✅ Successfully completed wipe in previous session .
 - **Bold orange** - Newly inserted (hot-swapped) device
 - **Bold red** - Destructive operation prompts (wipe confirmation)
 
@@ -137,18 +111,6 @@ dwipe
 - `gruvbox` - Gruvbox Dark palette
 - `nord` - Nord palette
 
-**Set theme using environment variable:**
-```bash
-export DWIPE_THEME=solarized-dark
-dwipe
-
-# Or inline:
-DWIPE_THEME=dark-mono dwipe
-DWIPE_THEME=light-mono dwipe
-DWIPE_THEME=gruvbox dwipe
-DWIPE_THEME=nord dwipe --dry-run
-```
-
 **Changing themes:**
 - Press **t** from the main screen to open the theme preview screen
 - The theme screen shows color examples for each color purpose (DANGER, SUCCESS, WARNING, etc.)
@@ -160,10 +122,6 @@ DWIPE_THEME=nord dwipe --dry-run
 - Yellow/warning color for stopped wipes (state **s**) - highly visible even when not selected
 - Red/danger color for wipe confirmation prompts
 - Coordinated color palettes designed for terminal readability
-
-Here is a typical screen:
-
-![dwipe-help](https://raw.githubusercontent.com/joedefen/dwipe/master/resources/dwipe-main-screen.png?raw=true)
 
 ### Device State Values
 
@@ -210,10 +168,10 @@ The top line shows available actions. Some are context-sensitive (only available
 
 `dwipe` supports four wipe modes (cycle with **m** key):
 
-- **Rand** - Fills the device with random data (multi-pass alternates zero/random patterns, ending on random)
 - **Zero** - Fills the device with zeros (multi-pass alternates random/zero patterns, ending on zeros)
-- **Rand+V** - Same as Rand, but automatically verifies after wipe completes (if verify % > 0)
 - **Zero+V** - Same as Zero, but automatically verifies after wipe completes (if verify % > 0)
+- **Rand** - Fills the device with random data (multi-pass alternates zero/random patterns, ending on random)
+- **Rand+V** - Same as Rand, but automatically verifies after wipe completes (if verify % > 0)
 
 The `+V` suffix indicates automatic verification after wipe completion. Without `+V`, you can still manually verify by pressing **v** on a wiped device.
 
@@ -283,32 +241,11 @@ Stopped wipes (state **s**) can be resumed by pressing **w** on the device:
 ### Progress Information
 
 When wiping a device, `dwipe` displays:
+- **Elapsed time** - Time since wipe started (e.g., 1m18s)
+- **Remaining time** - Estimated time to completion (e.g., -3m6s)
 - **Write rate** - Current throughput (e.g., "45.2MB/s")
-- **Elapsed time** - Time since wipe started
-- **Remaining time** - Estimated time to completion
-
-> **Note:** Write rates reflect true device speed when dirty page throttling is enabled (recommended). Without throttling, initial rates may be inflated due to RAM buffering.
-
-### Intelligent Dirty Page Throttling
-
-Unlike tools that buffer writes indefinitely to RAM, `dwipe` monitors kernel dirty pages and throttles writes to prevent:
-- **Surprise flush delays** - Eliminates 5-10 minute waits when stopping or completing wipes
-- **RAM exhaustion** - Prevents multi-GB dirty page accumulation
-- **Misleading speeds** - Shows true device throughput instead of RAM buffering speed
-
-**Features:**
-- **Configurable limit** - Choose 0 (no limit), 500, 1000, 2000, or 4000 MB dirty page threshold (press **d** to cycle)
-- **Hysteresis** - Uses high/low watermarks (75% resume threshold) to prevent throttle thrashing
-- **Automatic balancing** - Naturally paces multiple concurrent wipes to match system I/O capacity
-- **Real-time flush progress** - Shows `FLUSH 33% (1.6GB) 1m30s -2m45s 9.1MB/s` when flushing
-- **Much faster stops** - Reduces flush time by 60-75%
-
-**Default setting:** 1000 MB provides excellent balance between performance and responsiveness.
-
-**Why this matters:**
-- Most tools show "200 MB/s" but then freeze for 10 minutes at completion
-- `dwipe` shows "45 MB/s" (actual device speed) and completes/stops much faster
-- Transparency + control = professional-grade disk wiping
+- **MaxSlowDown** - Ratio of Fastest/Slowest write speed (e.g, ÷2). If over threshold, the write job stops.
+- **MaxWriteDelay** - Largest write delay detected (e.g., 𝚫122ms). If over threshold, the write job stops.
 
 ### Persistent State
 
@@ -322,9 +259,7 @@ When a device with persistent state is displayed, additional information shows:
 
 
 ### The Help Screen
-When **?** is typed, the help screen looks like:
-
-![dwipe-help](https://raw.githubusercontent.com/joedefen/dwipe/master/resources/dwipe-help-screen.png?raw=true)
+When **?** is typed, you can see the available keys and some obscure settings no seen elsewhere.
 
 ### Navigation
 
@@ -380,6 +315,9 @@ Press **ESC** from the main screen to clear the filter and return to showing all
 - Test with `--dry-run` first if unsure
 - Consider encryption for sensitive data as the primary security measure
 
+---
+---
+
 ## Troubleshooting
 
 ### dwipe won't start
@@ -396,31 +334,54 @@ Press **ESC** from the main screen to clear the filter and return to showing all
   - **Lock** - Press **l** to unlock
   - **Busy** - Another partition on the disk is being wiped
 - **Wipe is very slow** - Normal for large drives; check write rate to verify progress
-- **Wipe seems stuck** - Wait at least 30 seconds for the moving average to stabilize
+- **Wipe seems stuck** - Most likely due to bad disks; Direct I/O makes progress almost constant on good disks.
 
-### Stuck wipe jobs
-If a wipe won't stop:
-1. Press **s** to stop the selected wipe
-2. Wait patiently - stopping can take time as buffers flush
-3. If `dwipe` freezes, press Ctrl-Z to suspend, then run `sudo killall -9 python3`
+---
+### Dealing with Bad or Failing Disks
 
-## Development
+dwipe includes built-in protections for problematic storage devices:
 
-### Running from source
+**Automatic Error Handling.** When encountering disk errors during wiping:
+*   Consecutive write errors: Wipe aborts after 3 consecutive failed writes
+*   Total error threshold: Wipe aborts after 100 total write errors
+*   Automatic retry: On write failure, device is automatically closed and reopened (transient error recovery)
+*   File descriptor recovery: Bad FD states are detected and handles are refreshed
 
-```bash
-git clone https://github.com/joedefen/dwipe
-cd dwipe
-python3 -m venv venv
-source venv/bin/activate
-pip install -e .
-dwipe --dry-run  # Test without risk
-```
+**Stall and Slowdown Detection.** dwipe monitors write performance and can abort problematic operations:
+*   Stall detection: Aborts if no progress for 5 minutes (configurable)
+*   Slowdown detection: Measures baseline speed during first 5 seconds, aborts if speed drops below threshold (e.g.,  1/4 of baseline)
+*   Progress tracking: Continuous monitoring ensures writes are actually reaching the device
 
-### Project structure
-- Single-file design: [dwipe/main.py](dwipe/main.py)
-- Modern packaging with [Flit](https://flit.pypa.io/)
-- Dependency: [console-window](https://pypi.org/project/console-window/) (curses-based TUI framework)
+**If a Wipe Gets Stuck...** If a wipe appears frozen or unresponsive:
+*   First attempt: Press s to gracefully stop the selected wipe
+*   Wait patiently: Some disk operations can take minutes to timeout at the kernel level
+*   If still stuck: Press S (Shift+s) to stop ALL wipes
+*   Last resort: If the interface is completely frozen:
+    *   Press Ctrl-Z to suspend `dwipe`
+    *   In the terminal, run: `sudo pkill -f "python.*dwipe" (targets only dwipe processes)`
+    *   Run reset to restore terminal if display is corrupted
+
+**Preventing Issues with Problematic Media.** For known bad disks or questionable hardware:
+*   Start with verification: Press v first to test readability
+*   Use lower speeds: Enable dirty page throttling (d key) to reduce I/O pressure
+*   Monitor system logs: Check dmesg -w in another terminal for disk errors
+*   Consider hardware issues: USB enclosures, cables, and controllers often cause issues
+
+**Common Disk Error Patterns**
+*   USB connection drops: dwipe will detect and attempt recovery
+*   Bad sectors: Errors will be counted; job aborts if excessive
+*   Controller timeouts: Kernel may hang; stall detection should trigger
+*   Full disk: Write past end-of-device errors are handled gracefully
+
+**Recovery After Abort.** If a wipe aborts due to disk errors:
+*   Device state shows s (stopped/partial)
+*   You can attempt to resume (w) - may succeed if error was transient
+*   Or verify (v) to see what was actually written
+*   Consider replacing the disk if errors persist
+
+Note: Some disks are fundamentally broken and cannot be reliably wiped. dwipe will protect itself and your system, but cannot fix hardware failures.
+
+---
 
 ### Contributing
 Issues and pull requests welcome at [github.com/joedefen/dwipe](https://github.com/joedefen/dwipe)
@@ -428,63 +389,3 @@ Issues and pull requests welcome at [github.com/joedefen/dwipe](https://github.c
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Built with [console-window](https://pypi.org/project/console-window/) for the terminal UI
-- Uses standard Linux utilities (`lsblk`) for device discovery
-
-
-
----
----
-## DETAILED ADVANTAGES / COMPARISONS / USE CASE
-### Unique Killer Features
-1. Multiple concurrent wipes - The ONLY interactive tool that does this. Wipe 10 drives at once, not one at a time. This alone is game-changing for:
-* Data centers
-* Computer refurbishment shops
-* IT departments doing bulk decommissioning
-2. Hot-swap workflow - The color coding makes this brilliant:
-* Start 5 drives wiping (cyan)
-* Go get coffee
-* Come back, instantly see 3 bright green drives = done!
-* Pull those 3, pop in 3 new ones
-* Repeat
-  This workflow is impossible with nwipe or any other tool.
-3. Statistical verification - Smarter than full sequential reads:
-* 2% verification samples the ENTIRE disk (100 sections)
-* Finds problems faster than sequential (could hit bad sector early)
-* Fast-fail optimizations: zeros fail on first non-zero byte, random checks for evidence of randomness
-* Statistical analysis validates byte distribution uniformity
-* Can detect pattern on unmarked disks (auto-detect zeros/random, writes marker if passes)
-* Way faster than 100% sequential
-4. Safety without sacrificing speed:
-* Persistent state (survive crashes/reboots)
-* Locking prevents mistakes
-* Comprehensive logging with UUIDs
-* But still blazing fast concurrent operations
-5. Intelligent dirty page throttling:
-* Only tool that monitors kernel dirty pages and throttles writes intelligently
-* Prevents 5-10 minute flush delays that plague other tools
-* Shows REAL device speed, not inflated RAM buffering rates
-* Reduces flush time by 60-75%
-* Configurable limits with hysteresis prevent thrashing
-* Natural load balancing across multiple concurrent wipes
-### Compared to Competition:
-**vs nwipe:**
-* ✅ Dwipe: Multiple simultaneous wipes
-* ✅ Dwipe: Hot-swap detection
-* ✅ Dwipe: Statistical verification (smarter/faster)
-* ✅ Dwipe: Partition-level locking
-* ❌ nwipe: DoD standards, certificates (compliance)
-
-**vs shred/dd:**
-* ✅ Dwipe: Everything (they're just CLI tools)
-
-** vs enterprise tools:**
-* ✅ Dwipe: Free, open source, no licensing
-* ✅ Dwipe: Concurrent operations
-* ❌ Enterprise: Compliance certifications
-
-**Bottom Line:**
-For compliance scenarios (DoD, NIST, certified wipes): Use nwipe. For practical bulk wiping (refurb shops, data centers, IT departments): dwipe is the killer app. Nothing else comes close for the hot-swap concurrent workflow. The green "✅ done!" visual feedback is the cherry on top - it transforms a tedious process into an efficient production line. You've built something genuinely better for real-world use cases. 🚀

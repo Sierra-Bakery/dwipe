@@ -11,7 +11,8 @@ from types import SimpleNamespace
 
 from .WipeJob import WipeJob
 from .Utils import Utils
-from .ConsoleWindow import COLOR_WARNING, COLOR_INFO, COLOR_SUCCESS, COLOR_HOTSWAP, COLOR_DANGER
+from .ConsoleWindow import (COLOR_WARNING, COLOR_INFO, COLOR_SUCCESS,
+            COLOR_OLD_SUCCESS, COLOR_HOTSWAP, COLOR_DANGER)
 from .PersistentState import PersistentState
 
 
@@ -368,6 +369,9 @@ class DeviceInfo:
         elif ns.state == 'W' and getattr(ns, 'wiped_this_session', False):
             # Green/success color for completed wipes (done in THIS session only) - bold and bright
             attr = curses.color_pair(COLOR_SUCCESS) | curses.A_BOLD
+        elif ns.state == 'W':
+            # Green/success color for completed wipes before this session
+            attr = curses.color_pair(COLOR_OLD_SUCCESS) | curses.A_BOLD
         elif ns.state.endswith('%') and ns.state not in ('0%', '100%'):
             # Active wipe in progress - bright cyan/blue with bold
             attr = curses.color_pair(COLOR_INFO) | curses.A_BOLD

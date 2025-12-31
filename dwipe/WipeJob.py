@@ -1,6 +1,8 @@
 """
 WipeJob class for handling disk/partition wiping operations
+
 """
+# pylint: disable=broad-exception-raised,broad-exception-caught
 import os
 import json
 import time
@@ -22,6 +24,9 @@ class WipeJob:
     BLOCK_SIZE = 4096  # Alignment requirement for O_DIRECT
     WRITE_SIZE = 1 * 1024 * 1024  # 1MB (must be multiple of BLOCK_SIZE)
     BUFFER_SIZE = WRITE_SIZE  # Same size for O_DIRECT
+
+    # Marker constants (separate from O_DIRECT writes)
+    MARKER_SIZE = 16 * 1024  # 16KB for marker
     STATE_OFFSET = 15 * 1024  # where json is written (for marker buffer)
 
     # Aligned buffers allocated with mmap (initialized at module load)
@@ -170,6 +175,13 @@ class WipeJob:
         self.last_slowdown_check = 0
             # Initialize write history for speed calculation
         self.wr_hists.append(SimpleNamespace(mono=self.start_mono, written=resume_from))
+        
+        # ERROR ABORT FEATURE
+        self.max_consecutive_errors = 3 # a control
+        self.max_total_errors = 100 # a control
+        self.reopen_on_error = True # a control
+        self.reopen_count = 0 # cumulative (info only)
+        self.total_errors = 0 # cumulative
 
 
 
@@ -193,8 +205,7 @@ class WipeJob:
         device_name = device_path.replace('/dev/', '')
         existing_marker = WipeJob.read_marker_buffer(device_name)
         if existing_marker and existing_marker.scrubbed_bytes > 0:
-            # Round down to buffer boundary for safety
-            scrubbed = (existing_marker.scrubbed_bytes // WipeJob.WRITE_SIZE) * WipeJob.WRITE_SIZE
+            scrubbed = existing_marker.scrubbed_bytes
             resume_mode = existing_marker.mode  # Use original mode ('Rand' or 'Zero')
             passes = getattr(opts, 'passes', 1)
 
@@ -209,12 +220,21 @@ class WipeJob:
                 resume_from = 0
                 resume_mode = None
             else:
+                   # Partial/stopped wipe - resume from where it left off
+                resume_from = scrubbed
+                # Ensure we don't resume in the marker area
+                if resume_from < WipeJob.MARKER_SIZE:
+                    resume_from = WipeJob.MARKER_SIZE
+                # Also ensure not past the end (sanity check)
+                if resume_from > total_size * getattr(opts, 'passes', 1):
+                    resume_from = 0  # Start over if marker corrupted
+
                 # Partial/stopped wipe - resume from where it left off
                 # Smart resume: check if we're in the final pass
                 current_pass = scrubbed // total_size
                 last_pass_num = passes - 1
 
-                if passes > 1 and current_pass >= last_pass_num:
+                if current_pass >= last_pass_num:
                     # Resuming in final pass - check pattern on disk matches expected
                     # Create temporary job to use get_pass_pattern method
                     temp_job = WipeJob(device_path, total_size, opts)
@@ -230,9 +250,6 @@ class WipeJob:
                     else:
                         # Pattern matches - resume from current position
                         resume_from = scrubbed
-                else:
-                    # Not in final pass, or single-pass mode - resume normally
-                    resume_from = scrubbed
 
         job = WipeJob(device_path=device_path, total_size=total_size, opts=opts,
                      resume_from=resume_from, resume_mode=resume_mode)
@@ -297,81 +314,63 @@ class WipeJob:
         job.thread.start()
         return job
 
-    # Add this method to track baseline speed and check slowdown/stall
-    def _check_slowdown_and_stall(self, current_monotonic):
-        """Check for slowdown below threshold and stall conditions"""
+    def _check_for_stall(self, current_monotonic):
+        """Check for stall (no progress) - called frequently"""
+        if self.stall_timeout <= 0:
+            return False
         
-        # Initialize baseline tracking if needed
-        self.max_stall_secs = max(self.max_stall_secs, 1)
-        BASELINE_SEC = 10
-        if self.baseline_speed is None:
-            if (current_monotonic - self.start_mono) >= BASELINE_SEC:
-                # Calculate baseline speed over first 60 seconds
-                total_written_60s = self.total_written - self.resume_from
-                elapsed_60s = current_monotonic - self.start_mono
-                if elapsed_60s > 0:
-                    self.baseline_speed = total_written_60s / elapsed_60s
-                    self.baseline_end_mono = current_monotonic
-                    # Also initialize stall tracking
-                    self.last_progress_mono = current_monotonic
-                    self.last_progress_written = self.total_written
-                    self.max_stall_secs = max(self.max_stall_secs, 2)
-                return  # Baseline established, check next time
-            else:
-                return  # Still establishing baseline
-        
-        # Only check slowdown/stall every 10 seconds to reduce overhead
-        if current_monotonic - self.last_slowdown_check < 10:
-                return
-        self.last_slowdown_check = current_monotonic
-        self.max_stall_secs = max(self.max_stall_secs, 3)
-        
-        # 1. Check for stall (no progress in stall_timeout seconds)
-        if self.stall_timeout > 0:
-            stall_secs = current_monotonic - self.last_progress_mono
-            self.max_stall_secs = max(self.max_stall_secs, stall_secs)
-
-            if stall_secs >= self.stall_timeout:
-                # No progress for stall_timeout seconds - abort
-                self.do_abort = True
-                self.exception = f"Stall detected: No progress for {self.stall_timeout} seconds"
-                return True
-        
-        # 2. Check for slowdown (only if we have a baseline and slowdown_stop > 0)
-        if self.slowdown_stop > 0 and self.baseline_speed > 0:
-            # Calculate current speed over last 30 seconds
-            floor = current_monotonic - 30
-            recent_history = [h for h in self.wr_hists if h.mono >= floor]
-            
-            if len(recent_history) >= 2:
-                recent_start = recent_history[0]
-                recent_written = self.total_written - recent_start.written
-                recent_elapsed = current_monotonic - recent_start.mono
-                
-                if recent_elapsed > 1.0:  # Need meaningful time window
-                    current_speed = recent_written / recent_elapsed
-                    
-                    # Calculate slowdown ratio (current/baseline)
-                    slowdown_ratio = self.baseline_speed / current_speed if current_speed > 0 else 9999
-                    slowdown_ratio = int(round(slowdown_ratio, 0))
-
-                    self.max_slowdown_ratio = max(slowdown_ratio, self.max_slowdown_ratio)
-                    
-                    # Check if slowdown exceeds threshold
-                    if slowdown_ratio > self.slowdown_stop:
-                        self.do_abort = True
-                        self.exception = (f"Slowdown: ({current_speed/(1024*1024):.1f}) "
-                                         f"is 1/{slowdown_ratio} of baseline"
-                                          f" ({self.baseline_speed/(1024*1024):.1f} MB/s)")
-                        return True
-                    
-        
-        # Update progress tracking for stall detection
-        if self.total_written > self.last_progress_written:
-            self.last_progress_mono = current_monotonic
-            self.last_progress_written = self.total_written
+        time_since_progress = current_monotonic - self.last_progress_mono
+        self.max_stall_secs = max(time_since_progress, self.max_stall_secs)
+        if time_since_progress >= self.stall_timeout:
+            self.do_abort = True
+            self.exception = f"Stall detected: No progress for {time_since_progress:.1f} seconds"
+            return True
         
         return False
+
+    def _check_for_slowdown(self, current_monotonic):
+        """Check for slowdown - called every 10 seconds"""
+        if self.slowdown_stop <= 0 or self.baseline_speed is None or self.baseline_speed <= 0:
+            return False
+        
+        # Calculate current speed over last 30 seconds
+        floor = current_monotonic - 30
+        recent_history = [h for h in self.wr_hists if h.mono >= floor]
+        
+        if len(recent_history) >= 2:
+            recent_start = recent_history[0]
+            recent_written = self.total_written - recent_start.written
+            recent_elapsed = current_monotonic - recent_start.mono
+            
+            if recent_elapsed > 1.0:
+                current_speed = recent_written / recent_elapsed
+                self.baseline_speed = max(self.baseline_speed, current_speed)
+                slowdown_ratio = self.baseline_speed / max(current_speed, 1)
+                slowdown_ratio = int(round(slowdown_ratio, 0))
+                self.max_slowdown_ratio = max(self.max_slowdown_ratio, slowdown_ratio)
+                
+                if slowdown_ratio > self.slowdown_stop:
+                    self.do_abort = True
+                    self.exception = (f"Slowdown abort: ({Utils.human(current_speed)}B/s)"
+                                     f" is 1/{slowdown_ratio} baseline")
+                    return True
+        
+        return False
+
+    def _update_baseline_if_needed(self, current_monotonic):
+        """Update baseline speed measurement if still in first 60 seconds"""
+        if self.baseline_speed is not None:
+            return  # Baseline already established
+        
+        if (current_monotonic - self.start_mono) >= 60:
+            total_written_60s = self.total_written - self.resume_from
+            elapsed_60s = current_monotonic - self.start_mono
+            if elapsed_60s > 0:
+                self.baseline_speed = total_written_60s / elapsed_60s
+                self.baseline_end_mono = current_monotonic
+                self._last_slowdown_check = current_monotonic  # Start slowdown checking
+
+
 
     def get_status_str(self):
         """Get human-readable status string"""
@@ -494,7 +493,7 @@ class WipeJob:
         if verify_status is not None:
             data["verify_status"] = verify_status
         json_data = json.dumps(data).encode('utf-8')
-        buffer = bytearray(self.WRITE_SIZE)  # Only 16KB, not 1MB
+        buffer = bytearray(self.MARKER_SIZE)  # Only 16KB, not 1MB
         buffer[:self.STATE_OFFSET] = b'\x00' * self.STATE_OFFSET
         buffer[self.STATE_OFFSET:self.STATE_OFFSET + len(json_data)] = json_data
         remaining_size = self.WRITE_SIZE - (self.STATE_OFFSET + len(json_data))
@@ -626,7 +625,7 @@ class WipeJob:
         try:
             with open(f'/dev/{device_name}', 'rb') as device:
                 device.seek(0)
-                buffer = device.read(WipeJob.BUFFER_SIZE)
+                buffer = device.read(WipeJob.MARKER_SIZE)
         except Exception:
             return None  # cannot find info
 
@@ -698,6 +697,11 @@ class WipeJob:
                     # Calculate current pass and offset within pass
                     self.current_pass = self.total_written // self.total_size
                     offset_in_pass = self.total_written % self.total_size
+                    
+                    # SKIP MARKER AREA - don't overwrite it!
+                    if offset_in_pass < self.MARKER_SIZE:
+                        self.total_written += self.MARKER_SIZE - offset_in_pass
+                        offset_in_pass = self.MARKER_SIZE
 
                     # Determine pattern for this pass (alternating for multi-pass)
                     is_random_pass = self.get_pass_pattern(self.current_pass, desired_mode)
@@ -714,10 +718,27 @@ class WipeJob:
                     pass_bytes_written = 0
 
                     while pass_bytes_written < bytes_to_write_this_pass and not self.do_abort:
-                       # NEW: Check for slowdown and stall inside inner loop too
                         current_mono = time.monotonic()
-                        if self._check_slowdown_and_stall(current_mono):
-                            break  # Abort if slowdown/stall detected
+
+                        # Update baseline if needed (first 60 seconds)
+                        self._update_baseline_if_needed(current_mono)
+                        
+                        # Check for stall (frequently)
+                        if self._check_for_stall(current_mono):
+                            break
+                        
+                        # Check for slowdown (every 10 seconds)
+                        if self.baseline_speed is not None:
+                            time_since_last_check = current_mono - self.last_slowdown_check
+                            if time_since_last_check >= 10:
+                                if self._check_for_slowdown(current_mono):
+                                    break
+                                self.last_slowdown_check = current_mono
+                        
+                        # Update progress tracking
+                        if self.total_written > self.last_progress_written:
+                            self.last_progress_mono = current_mono
+
       
                         # Calculate chunk size (must be block-aligned for O_DIRECT)
                         remaining = bytes_to_write_this_pass - pass_bytes_written
@@ -741,10 +762,11 @@ class WipeJob:
                         else:
                             try:
                                 # Write with O_DIRECT (bypasses page cache)
-                                bytes_written = os.write(fd, chunk)
+                                bytes_written, fd = self.safe_write(fd, chunk)
                             except Exception as e:
                                 # Save exception for debugging
-                                self.exception = f"Write error at {self.total_written}: {e}"
+                                self.exception = str(e)
+                                self.do_abort = True
                                 bytes_written = 0
 
                         self.total_written += bytes_written
@@ -752,7 +774,7 @@ class WipeJob:
 
                         # Periodically update marker for crash recovery (every 30s)
                         # Note: marker writes use separate buffered file handle
-                        if not self.opts.dry_run and self.total_written > self.BUFFER_SIZE:
+                        if not self.opts.dry_run and self.total_written > self.MARKER_SIZE:
                             marker_is_random = (desired_mode == 'Rand')
                             self.maybe_update_marker(marker_is_random)
 
@@ -796,6 +818,100 @@ class WipeJob:
             if not self.done:
                 self.done = True
 
+    def safe_write(self, fd, chunk):
+        """Safe write with error recovery.
+        
+        Returns:
+            tuple: (bytes_written, fd) - fd might be new if reopened
+        
+        Raises:
+            Exception: If should abort
+        """
+        while True:
+            try:
+                bytes_written = os.write(fd, chunk)
+                
+                # Success
+                self.consecutive_errors = 0
+                self.reopen_count = 0
+                return bytes_written, fd
+                
+            except Exception as e:
+                # Last attempt or not reopening?
+                if reopen_attempt == max_reopens or not self.reopen_on_error:
+                    # Final failure - update counts and check abort
+                    self.consecutive_errors += 1
+                    self.total_errors += 1
+                    
+                    if self.consecutive_errors >= self.max_consecutive_errors:
+                        raise Exception(f"{self.consecutive_errors} consecutive errors") from e
+                    if self.total_errors >= self.max_total_errors:
+                        raise Exception(f"{self.total_errors} total errors") from e
+                    
+                    # Not aborting yet, but this write failed
+                    return len(chunk), fd
+                
+                # Try reopening
+                try:
+                    current_pos = self.total_written
+                    os.close(fd)
+                    fd = os.open(self.device_path, os.O_WRONLY | os.O_DIRECT)
+                    os.lseek(fd, current_pos, os.SEEK_SET)
+                    self.reopen_count += 1
+                    print(f"Reopened device (attempt {self.reopen_count})")
+                    
+                    # Loop will retry the write with new fd
+                    
+                except Exception as reopen_error:
+                    # Reopen failed
+                    self.consecutive_errors += 1
+                    self.total_errors += 1
+                    raise Exception(f"Reopen failed: {reopen_error}") from e
+        return len(chunk), fd
+            
+    def safe_write(self, fd, chunk):
+        """Safe write with error recovery.
+        
+        Returns:
+            tuple: (bytes_written, fd) - bytes_written is either:
+                   - Actual bytes written (success)
+                   - len(chunk) (failed but non-fatal - skip entire chunk)
+                   fd might be new if reopened
+        
+        Raises:
+            Exception: If should abort (too many consecutive errors)
+        """
+        consecutive_errors = 0
+        while True:  # Keep trying until success, skip, or abort
+            try:
+                bytes_written = os.write(fd, chunk)
+                self.reopen_count = 0
+                return bytes_written, fd # success
+                
+            except Exception as e:
+                consecutive_errors += 1
+                self.total_errors += 1
+                
+                # Check if we should abort
+                if consecutive_errors >= self.max_consecutive_errors:
+                    raise Exception(f"{self.consecutive_errors} consecutive write errors") from e
+                
+                if self.total_errors >= self.max_total_errors:
+                    raise Exception(f"{self.total_errors} total write errors") from e
+                
+                # Not fatal yet - try reopening if enabled
+                if self.reopen_on_error:
+                    try:
+                        current_pos = self.total_written
+                        ofd, fd = fd, os.open(self.device_path, os.O_WRONLY | os.O_DIRECT)
+                        os.close(ofd)
+                        os.lseek(fd, current_pos, os.SEEK_SET)
+                        self.reopen_count += 1
+                        
+                    except Exception:
+                        # Reopen failed - count as another error
+                        self.total_errors += 1
+            
     @staticmethod
     def analyze_data_pattern(data):
         """Analyze a chunk of data to determine if it's zeros, random, or other
@@ -842,7 +958,7 @@ class WipeJob:
 
         return "not-wiped"
 
-    def verify_partition(self, verify_pct):
+    def slow_verify_partition(self, verify_pct):
         """Verify that partition was wiped according to expected pattern
 
         Reads verify_pct% of the disk sequentially from the start (after marker).
@@ -894,7 +1010,7 @@ class WipeJob:
 
             try:
                 # Skip the marker buffer area (first 1MB) to avoid reading the marker
-                marker_skip = WipeJob.BUFFER_SIZE  # 1MB
+                marker_skip = WipeJob.MARKER_SIZE  # 16KB
                 usable_size = self.total_size - marker_skip
 
                 # Divide disk into 100 sections for random sampling
@@ -1027,6 +1143,467 @@ class WipeJob:
         except Exception:
             self.exception = traceback.format_exc()
             self.verify_result = "error"
+
+    def defective_verify_partition(self, verify_pct):
+        """CPU-optimized verification with same read strategy"""
+        # Initialize verify state
+        if not self.verify_phase:
+            self.verify_pct = verify_pct
+            self.verify_start_mono = time.monotonic()
+            self.verify_progress = 0
+            self.wr_hists = []
+            self.wr_hists.append(SimpleNamespace(mono=self.verify_start_mono, written=0))
+            self.verify_phase = True
+
+        if verify_pct == 0:
+            self.verify_result = "skipped"
+            return
+
+        # Fast-fail for zeros
+        fast_fail_zeros = (self.expected_pattern == "zeroed")
+        
+        # For random/unmarked: track byte distribution
+        if self.expected_pattern == "random" or self.expected_pattern is None:
+            byte_counts = [0] * 256
+            total_samples = 0
+        else:
+            byte_counts = None
+            total_samples = 0
+        
+        # For unmarked disks: track if ALL bytes are zero
+        all_zeros = (self.expected_pattern is None)
+        found_nonzero = False
+        
+        # Pre-allocated zero pattern for fast comparison
+        ZERO_PATTERN_64K = b'\x00' * (64 * 1024)  # 64KB zero pattern
+
+        try:
+            # Open with regular buffered I/O
+            if not self.opts.dry_run:
+                fd = os.open(self.device_path, os.O_RDONLY)
+            else:
+                fd = None
+
+            read_chunk_size = 64 * 1024  # 64KB chunks
+            SAMPLE_STEP = 23  # Sample every 256th byte (0.4%)
+
+            # Skip marker area
+            marker_skip = WipeJob.BUFFER_SIZE
+            usable_size = self.total_size - marker_skip
+            
+            # Divide disk into 100 sections for random sampling
+            num_sections = 100
+            section_size = usable_size // num_sections
+
+            total_bytes_verified = 0
+            total_bytes_sampled = 0
+
+            for section_idx in range(num_sections):
+                if self.do_abort:
+                    break
+
+                # Calculate bytes to verify in this section
+                section_start = marker_skip + (section_idx * section_size)
+                bytes_to_verify = int(section_size * verify_pct / 100)
+
+                # Random offset within section
+                if bytes_to_verify < section_size:
+                    offset_in_section = random.randint(0, section_size - bytes_to_verify)
+                else:
+                    offset_in_section = 0
+
+                read_pos = section_start + offset_in_section
+                verified_in_section = 0
+
+                # Seek to position in this section
+                if not self.opts.dry_run:
+                    os.lseek(fd, read_pos, os.SEEK_SET)
+
+                # Read data from this section
+                while verified_in_section < bytes_to_verify:
+                    if self.do_abort:
+                        break
+
+                    chunk_size = min(read_chunk_size, bytes_to_verify - verified_in_section)
+
+                    if self.opts.dry_run:
+                        time.sleep(0.01)
+                        data = b'\x00' * chunk_size
+                    else:
+                        data = os.read(fd, chunk_size)
+                        if not data:
+                            break
+
+                    # --------------------------------------------------
+                    # OPTIMIZED ANALYSIS CODE BELOW
+                    # --------------------------------------------------
+                    
+                    # FAST zero check for zeroed pattern
+                    if fast_fail_zeros:
+                        # Ultra-fast: compare against pre-allocated zero pattern
+                        if memoryview(data) != ZERO_PATTERN_64K[:len(data)]:
+                            failed_offset = read_pos + verified_in_section
+                            self.verify_result = f"not-wiped (non-zero at {Utils.human(failed_offset)})"
+                            if fd is not None:
+                                os.close(fd)
+                            return
+
+                    # FAST check for unmarked disks (looking for all zeros)
+                    if all_zeros and not found_nonzero:
+                        # Fast check: use bytes.count() which is C-optimized
+                        if data.count(0) != len(data):
+                            found_nonzero = True
+
+                    # FAST random pattern analysis
+                    if byte_counts is not None:
+                        # Use memoryview for fast slicing
+                        mv = memoryview(data)
+                        data_len = len(data)
+                        
+                        # Sample every SAMPLE_STEP-th byte
+                        for i in range(0, data_len, SAMPLE_STEP):
+                            byte_counts[mv[i]] += 1
+                            total_samples += 1
+                    
+                    # --------------------------------------------------
+                    # END OPTIMIZED ANALYSIS CODE
+                    # --------------------------------------------------
+
+                    verified_in_section += len(data)
+                    total_bytes_verified += len(data)
+                    self.verify_progress += len(data)
+
+            # Close file descriptor
+            if fd is not None:
+                os.close(fd)
+
+            # Determine final result with optimized calculations
+            if fast_fail_zeros:
+                self.verify_result = "zeroed"
+            elif all_zeros:
+                if not found_nonzero:
+                    self.verify_result = "zeroed"
+                    self.expected_pattern = "zeroed"
+                else:
+                    # Check if distribution is uniform enough
+                    if total_samples > 10000:  # Need reasonable sample size
+                        # Fast max calculation
+                        max_count = max(byte_counts)  # C-optimized
+                        max_freq = max_count / total_samples
+                        
+                        # If one byte dominates (>95%), it's likely zeros
+                        # If max frequency is high (>5%), it's likely real data
+                        if 0.05 < max_freq < 0.95:
+                            self.verify_result = "not-wiped"
+                        elif max_freq < 0.02:
+                            self.verify_result = f"random (max={max_freq*100:.2f}%)"
+                            self.expected_pattern = "random"
+                        else:
+                            self.verify_result = f"not-wiped (max={max_freq*100:.2f}%)"
+                    else:
+                        self.verify_result = "not-wiped"
+            elif byte_counts and total_samples > 0:
+                # Known random pattern - check distribution uniformity
+                max_count = max(byte_counts)  # C-optimized
+                max_freq = max_count / total_samples
+                
+                # Check for fairly even distribution (max byte < 2% frequency)
+                if max_freq < 0.02:
+                    self.verify_result = f"random (max={max_freq*100:.2f}%)"
+                else:
+                    self.verify_result = f"not-wiped (max={max_freq*100:.2f}%)"
+            else:
+                self.verify_result = "skipped"
+
+        except Exception:
+            self.exception = traceback.format_exc()
+            self.verify_result = "error"
+
+
+
+    def verify_partition(self, verify_pct):
+        """Verify partition with section-by-section analysis"""
+        # Initialize verify state
+        if not self.verify_phase:
+            self.verify_pct = verify_pct
+            self.verify_start_mono = time.monotonic()
+            self.verify_progress = 0
+            self.wr_hists = []
+            self.wr_hists.append(SimpleNamespace(mono=self.verify_start_mono, written=0))
+            self.verify_phase = True
+
+        if verify_pct == 0:
+            self.verify_result = "skipped"
+            return
+
+        # Fast-fail for zeros
+        fast_fail_zeros = (self.expected_pattern == "zeroed")
+        
+        # For unmarked disks: track if ALL bytes are zero
+        all_zeros = (self.expected_pattern is None)
+        
+        # Track section results for debugging
+        self.section_results = []  # Store (section_idx, result, stats)
+
+        try:
+            # Open with regular buffered I/O
+            if not self.opts.dry_run:
+                fd = os.open(self.device_path, os.O_RDONLY)
+            else:
+                fd = None
+
+            read_chunk_size = 64 * 1024  # 64KB chunks
+            SAMPLE_STEP = 101  # Sample every 256th byte (0.4%)
+
+            # Skip marker area
+            marker_skip = WipeJob.BUFFER_SIZE
+            usable_size = self.total_size - marker_skip
+            
+            # Divide disk into 100 sections for sampling
+            num_sections = 100
+            section_size = usable_size // num_sections
+
+            # Pre-allocated zero pattern for fast comparison
+            ZERO_PATTERN_64K = b'\x00' * (64 * 1024)
+
+            # Track if any section failed
+            overall_failed = False
+            failure_reason = ""
+            failed_section = -1
+
+            for section_idx in range(num_sections):
+                if self.do_abort or overall_failed:
+                    break
+
+                # Reset analysis for THIS SECTION
+                section_byte_counts = [0] * 256
+                section_samples = 0
+                section_found_nonzero = False
+
+                # Calculate bytes to verify in this section
+                bytes_in_section = min(section_size, usable_size - section_idx * section_size)
+                bytes_to_verify = int(bytes_in_section * verify_pct / 100)
+
+                if bytes_to_verify == 0:
+                    self.section_results.append((section_idx, "skipped", {}))
+                    continue
+
+                # Random offset within section
+                if bytes_to_verify < bytes_in_section:
+                    offset_in_section = random.randint(0, bytes_in_section - bytes_to_verify)
+                else:
+                    offset_in_section = 0
+
+                read_pos = marker_skip + (section_idx * section_size) + offset_in_section
+                verified_in_section = 0
+
+                # Seek to position in this section
+                if not self.opts.dry_run:
+                    os.lseek(fd, read_pos, os.SEEK_SET)
+
+                # Read and analyze THIS SECTION
+                while verified_in_section < bytes_to_verify:
+                    if self.do_abort:
+                        break
+
+                    chunk_size = min(read_chunk_size, bytes_to_verify - verified_in_section)
+
+                    if self.opts.dry_run:
+                        time.sleep(0.01)
+                        data = b'\x00' * chunk_size
+                    else:
+                        data = os.read(fd, chunk_size)
+                        if not data:
+                            break
+
+                    # --------------------------------------------------
+                    # SECTION ANALYSIS
+                    # --------------------------------------------------
+                    
+                    # FAST zero check for zeroed pattern
+                    if fast_fail_zeros:
+                        # Ultra-fast: compare against pre-allocated zero pattern
+                        if memoryview(data) != ZERO_PATTERN_64K[:len(data)]:
+                            failed_offset = read_pos + verified_in_section
+                            overall_failed = True
+                            failure_reason = f"non-zero at {Utils.human(failed_offset)}"
+                            failed_section = section_idx
+                            break
+
+                    # FAST check for unmarked disks (looking for all zeros)
+                    if all_zeros and not section_found_nonzero:
+                        # Fast check: use bytes.count() which is C-optimized
+                        if data.count(0) != len(data):
+                            section_found_nonzero = True
+
+                    # RANDOM pattern analysis (always collect data for analysis)
+                    # Use memoryview for fast slicing
+                    mv = memoryview(data)
+                    data_len = len(data)
+                    
+                    # Sample every SAMPLE_STEP-th byte
+                    for i in range(0, data_len, SAMPLE_STEP):
+                        section_byte_counts[mv[i]] += 1
+                        section_samples += 1
+                    
+                    # --------------------------------------------------
+                    # END SECTION ANALYSIS
+                    # --------------------------------------------------
+
+                    verified_in_section += len(data)
+                    self.verify_progress += len(data) // SAMPLE_STEP  # Track sampled bytes
+
+                # After reading section, analyze it
+                if overall_failed:
+                    break
+
+                # Determine section result
+                if fast_fail_zeros:
+                    # Already passed zero check if we got here
+                    section_result = "zeroed"
+                    section_stats = {}
+                    
+                elif all_zeros:
+                    if not section_found_nonzero:
+                        section_result = "zeroed"
+                        section_stats = {}
+                    else:
+                        # Need to check if it's random
+                        section_result, section_stats = self._analyze_section_randomness(
+                            section_byte_counts, section_samples
+                        )
+                        
+                else:  # Expected random
+                    section_result, section_stats = self._analyze_section_randomness(
+                        section_byte_counts, section_samples
+                    )
+                
+                # Store section result
+                self.section_results.append((section_idx, section_result, section_stats))
+                
+                # Check if section failed
+                if (self.expected_pattern == "random" and section_result != "random") or \
+                   (self.expected_pattern == "zeroed" and section_result != "zeroed") or \
+                   (self.expected_pattern is None and section_result == "not-wiped"):
+                    
+                    overall_failed = True
+                    failure_reason = f"section {section_idx}: {section_result}"
+                    failed_section = section_idx
+                    break
+
+            # Close file descriptor
+            if fd is not None:
+                os.close(fd)
+
+            # Determine overall result
+            if overall_failed:
+                if self.expected_pattern == "zeroed":
+                    self.verify_result = f"not-wiped ({failure_reason})"
+                elif self.expected_pattern == "random":
+                    self.verify_result = f"not-wiped ({failure_reason})"
+                else:  # unmarked
+                    # Count section results
+                    zeroed_sections = sum(1 for _, result, _ in self.section_results if result == "zeroed")
+                    random_sections = sum(1 for _, result, _ in self.section_results if result == "random")
+                    total_checked = len([r for _, r, _ in self.section_results if r != "skipped"])
+                    
+                    if zeroed_sections == total_checked:
+                        self.verify_result = "zeroed"
+                        self.expected_pattern = "zeroed"
+                    elif random_sections == total_checked:
+                        self.verify_result = "random"
+                        self.expected_pattern = "random"
+                    else:
+                        self.verify_result = f"mixed ({failure_reason})"
+            else:
+                # All sections passed
+                if self.expected_pattern == "zeroed":
+                    self.verify_result = "zeroed"
+                elif self.expected_pattern == "random":
+                    self.verify_result = "random"
+                else:  # unmarked
+                    # Determine from section consensus
+                    zeroed_sections = sum(1 for _, result, _ in self.section_results if result == "zeroed")
+                    random_sections = sum(1 for _, result, _ in self.section_results if result == "random")
+                    
+                    if zeroed_sections > random_sections:
+                        self.verify_result = "zeroed"
+                        self.expected_pattern = "zeroed"
+                    else:
+                        self.verify_result = "random"
+                        self.expected_pattern = "random"
+
+        except Exception:
+            self.exception = traceback.format_exc()
+            self.verify_result = "error"
+
+
+
+
+
+
+    def _analyze_section_randomness(self, byte_counts, total_samples):
+        """Analyze if a section appears random"""
+        if total_samples < 100:
+            return "insufficient-data", {"samples": total_samples}
+        
+        # Calculate statistics
+        max_count = max(byte_counts)
+        max_freq = max_count / total_samples
+        
+        # Count unique bytes seen
+        unique_bytes = sum(1 for count in byte_counts if count > 0)
+        unique_pct = (unique_bytes / 256) * 100
+        
+        # Count completely unused bytes
+        unused_bytes = sum(1 for count in byte_counts if count == 0)
+        
+        # Calculate expected frequency and variance
+        expected = total_samples / 256
+        if expected > 0:
+            # Coefficient of variation (measure of dispersion)
+            variance = sum((count - expected) ** 2 for count in byte_counts) / 256
+            std_dev = variance ** 0.5
+            cv = std_dev / expected
+        else:
+            cv = float('inf')
+        
+        # Decision logic for "random"
+        # Good random data should:
+        # 1. Use most byte values (>200 unique)
+        # 2. No single byte dominates (<2% frequency)
+        # 3. Relatively even distribution (CV < 2.0)
+        # 4. Not too many zeros (if it's supposed to be random, not zeroed)
+        
+        is_random = (unique_bytes > 200 and      # >78% of bytes used
+                     max_freq < 0.02 and         # No byte > 2%
+                     cv < 2.0 and               # Not too lumpy
+                     byte_counts[0] / total_samples < 0.5)  # Not mostly zeros
+        
+        stats = {
+            "samples": total_samples,
+            "max_freq": max_freq,
+            "unique_bytes": unique_bytes,
+            "unused_bytes": unused_bytes,
+            "cv": cv,
+            "zero_freq": byte_counts[0] / total_samples if total_samples > 0 else 0
+        }
+        
+        if is_random:
+            return "random", stats
+        else:
+            # Check if it's zeros
+            if byte_counts[0] / total_samples > 0.95:
+                return "zeroed", stats
+            else:
+                return "not-wiped", stats
+
+
+
+
+
+
+
 
     def _write_marker_with_verify_status(self, is_random):
         """Write marker buffer with verification status if verification was performed

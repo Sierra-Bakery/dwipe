@@ -97,105 +97,108 @@ COLOR_EMPHASIS = 5     # For emphasized text
 COLOR_ERROR = 6        # For errors
 COLOR_PROGRESS = 7     # For progress indicators
 COLOR_HOTSWAP = 9      # For newly inserted devices (hot-swapped)
+COLOR_OLD_SUCCESS = 10      # For completed operations
 
-# Color theme definitions
-# Each theme maps semantic colors to (foreground, background) tuples
-# -1 means use terminal default
-# 'default_fg' and 'default_bg' set the overall terminal appearance
 THEMES = {
     'dark-mono': {
         'name': 'Dark Mono',
-        'default_fg': 253,          # almost-white (very light grey)
-        'default_bg': 232,          # almost-black (very dark grey)
-        COLOR_DANGER: (196, 232),   # bright red on almost-black
-        COLOR_SUCCESS: (46, 232),   # bright green on almost-black
-        COLOR_WARNING: (226, 232),  # bright yellow on almost-black
-        COLOR_INFO: (51, 232),      # bright cyan on almost-black
-        COLOR_EMPHASIS: (255, 232), # bright white on almost-black
-        COLOR_ERROR: (196, 232),    # bright red on almost-black
-        COLOR_PROGRESS: (39, 232),  # bright blue on almost-black
-        COLOR_HOTSWAP: (208, 232),  # bright orange on almost-black
+        'default_fg': 253,
+        'default_bg': 232,
+        COLOR_DANGER: (196, 232),
+        COLOR_SUCCESS: (46, 232),      # Bright green
+        COLOR_OLD_SUCCESS: (22, 232),  # Dark green on almost-black
+        COLOR_WARNING: (226, 232),
+        COLOR_INFO: (51, 232),
+        COLOR_EMPHASIS: (255, 232),
+        COLOR_ERROR: (196, 232),
+        COLOR_PROGRESS: (39, 232),
+        COLOR_HOTSWAP: (208, 232),
     },
     'light-mono': {
         'name': 'Light Mono',
-        'default_fg': 233,          # almost-black (very dark grey)
-        'default_bg': 253,          # almost-white (very light grey)
-        COLOR_DANGER: (196, 253),   # bright red on almost-white
-        COLOR_SUCCESS: (28, 253),   # darker green on almost-white (more visible)
-        COLOR_WARNING: (208, 253),  # bright orange on almost-white
-        COLOR_INFO: (25, 253),      # darker blue/cyan on almost-white
-        COLOR_EMPHASIS: (232, 253), # darker black on almost-white
-        COLOR_ERROR: (196, 253),    # bright red on almost-white
-        COLOR_PROGRESS: (27, 253),  # darker blue on almost-white
-        COLOR_HOTSWAP: (166, 253),  # darker orange on almost-white
+        'default_fg': 233,
+        'default_bg': 253,
+        COLOR_DANGER: (196, 253),
+        COLOR_SUCCESS: (28, 253),      # Darker green
+        COLOR_OLD_SUCCESS: (22, 253),  # Even darker green on almost-white
+        COLOR_WARNING: (208, 253),
+        COLOR_INFO: (25, 253),
+        COLOR_EMPHASIS: (232, 253),
+        COLOR_ERROR: (196, 253),
+        COLOR_PROGRESS: (27, 253),
+        COLOR_HOTSWAP: (166, 253),
     },
     'default': {
         'name': 'Terminal Default',
-        'default_fg': -1,           # use terminal default
-        'default_bg': -1,           # use terminal default
-        COLOR_DANGER: (1, -1),      # red
-        COLOR_SUCCESS: (2, -1),     # green
-        COLOR_WARNING: (3, -1),     # yellow
-        COLOR_INFO: (6, -1),        # cyan
-        COLOR_EMPHASIS: (7, -1),    # white
-        COLOR_ERROR: (9, -1),       # bright red
-        COLOR_PROGRESS: (4, -1),    # blue
-        COLOR_HOTSWAP: (208, -1),   # orange
+        'default_fg': -1,
+        'default_bg': -1,
+        COLOR_DANGER: (1, -1),
+        COLOR_SUCCESS: (2, -1),        # Standard green
+        COLOR_OLD_SUCCESS: (22, -1),   # Bright green (dim relative to bright)
+        COLOR_WARNING: (3, -1),
+        COLOR_INFO: (6, -1),
+        COLOR_EMPHASIS: (7, -1),
+        COLOR_ERROR: (9, -1),
+        COLOR_PROGRESS: (4, -1),
+        COLOR_HOTSWAP: (208, -1),
     },
     'solarized-dark': {
         'name': 'Solarized Dark',
-        'default_fg': 244,          # base0 (light grey)
-        'default_bg': 234,          # base03 (very dark blue-grey)
-        COLOR_DANGER: (160, 234),   # red on base03
-        COLOR_SUCCESS: (64, 234),   # green on base03
-        COLOR_WARNING: (136, 234),  # yellow on base03
-        COLOR_INFO: (37, 234),      # cyan on base03
-        COLOR_EMPHASIS: (230, 234), # base3 (bright) on base03
-        COLOR_ERROR: (196, 234),    # bright red on base03
-        COLOR_PROGRESS: (33, 234),  # blue on base03
-        COLOR_HOTSWAP: (166, 234),  # orange on base03
+        'default_fg': 244,
+        'default_bg': 234,
+        COLOR_DANGER: (160, 234),
+        COLOR_SUCCESS: (64, 234),      # Solarized green
+        COLOR_OLD_SUCCESS: (28, 234),  # Darker green on base03
+        COLOR_WARNING: (136, 234),
+        COLOR_INFO: (37, 234),
+        COLOR_EMPHASIS: (230, 234),
+        COLOR_ERROR: (196, 234),
+        COLOR_PROGRESS: (33, 234),
+        COLOR_HOTSWAP: (166, 234),
     },
     'solarized-light': {
         'name': 'Solarized Light',
-        'default_fg': 240,          # base00 (dark grey)
-        'default_bg': 230,          # base3 (very light cream)
-        COLOR_DANGER: (160, 230),   # red on base3
-        COLOR_SUCCESS: (64, 230),   # green on base3
-        COLOR_WARNING: (166, 230),  # orange on base3 (more visible)
-        COLOR_INFO: (37, 230),      # cyan on base3
-        COLOR_EMPHASIS: (235, 230), # base03 (very dark) on base3
-        COLOR_ERROR: (196, 230),    # bright red on base3
-        COLOR_PROGRESS: (33, 230),  # blue on base3
-        COLOR_HOTSWAP: (208, 230),  # bright orange on base3
+        'default_fg': 240,
+        'default_bg': 230,
+        COLOR_DANGER: (160, 230),
+        COLOR_SUCCESS: (64, 230),      # Solarized green
+        COLOR_OLD_SUCCESS: (28, 230),  # Darker green on base3
+        COLOR_WARNING: (166, 230),
+        COLOR_INFO: (37, 230),
+        COLOR_EMPHASIS: (235, 230),
+        COLOR_ERROR: (196, 230),
+        COLOR_PROGRESS: (33, 230),
+        COLOR_HOTSWAP: (208, 230),
     },
     'gruvbox': {
         'name': 'Gruvbox Dark',
-        'default_fg': 223,          # gruvbox fg (cream)
-        'default_bg': 235,          # gruvbox bg (dark brown)
-        COLOR_DANGER: (167, 235),   # gruvbox red
-        COLOR_SUCCESS: (142, 235),  # gruvbox green
-        COLOR_WARNING: (214, 235),  # gruvbox yellow/orange
-        COLOR_INFO: (109, 235),     # gruvbox aqua
-        COLOR_EMPHASIS: (229, 235), # bright fg
-        COLOR_ERROR: (203, 235),    # bright red
-        COLOR_PROGRESS: (109, 235), # gruvbox blue
-        COLOR_HOTSWAP: (208, 235),  # gruvbox orange
+        'default_fg': 223,
+        'default_bg': 235,
+        COLOR_DANGER: (167, 235),
+        COLOR_SUCCESS: (142, 235),     # Gruvbox green
+        COLOR_OLD_SUCCESS: (106, 235), # Gruvbox medium green (dimmer)
+        COLOR_WARNING: (214, 235),
+        COLOR_INFO: (109, 235),
+        COLOR_EMPHASIS: (229, 235),
+        COLOR_ERROR: (203, 235),
+        COLOR_PROGRESS: (109, 235),
+        COLOR_HOTSWAP: (208, 235),
     },
     'nord': {
         'name': 'Nord',
-        'default_fg': 252,          # nord snow storm (light)
-        'default_bg': 236,          # nord polar night (dark blue-grey)
-        COLOR_DANGER: (203, 236),   # nord aurora red
-        COLOR_SUCCESS: (150, 236),  # nord aurora green
-        COLOR_WARNING: (220, 236),  # nord aurora yellow
-        COLOR_INFO: (116, 236),     # nord frost cyan
-        COLOR_EMPHASIS: (231, 236), # bright white
-        COLOR_ERROR: (203, 236),    # bright red
-        COLOR_PROGRESS: (136, 236), # nord frost blue
-        COLOR_HOTSWAP: (208, 236),  # nord aurora orange
+        'default_fg': 252,
+        'default_bg': 236,
+        COLOR_DANGER: (203, 236),
+        COLOR_SUCCESS: (150, 236),     # Nord aurora green
+        COLOR_OLD_SUCCESS: (107, 236), # Nord frost green (dimmer)
+        COLOR_WARNING: (220, 236),
+        COLOR_INFO: (116, 236),
+        COLOR_EMPHASIS: (231, 236),
+        COLOR_ERROR: (203, 236),
+        COLOR_PROGRESS: (136, 236),
+        COLOR_HOTSWAP: (208, 236),
     },
 }
-
 # Global theme selection (can be set via environment variable DWIPE_THEME)
 CURRENT_THEME = None  # Will be set in start_curses()
 
@@ -248,7 +251,7 @@ def set_theme(theme_name):
             ConsoleWindow.static_win.body.pad.bkgd(' ', curses.color_pair(8))
 
     # Reinitialize color pairs with new theme
-    for color_id in [COLOR_DANGER, COLOR_SUCCESS, COLOR_WARNING,
+    for color_id in [COLOR_DANGER, COLOR_SUCCESS, COLOR_OLD_SUCCESS, COLOR_WARNING,
                    COLOR_INFO, COLOR_EMPHASIS, COLOR_ERROR, COLOR_PROGRESS, COLOR_HOTSWAP]:
         if color_id in theme:
             fg, bg = theme[color_id]
