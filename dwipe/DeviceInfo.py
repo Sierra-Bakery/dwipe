@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from .WipeJob import WipeJob
 from .Utils import Utils
-from .ConsoleWindow import Theme
+from console_window import Theme
 from .PersistentState import PersistentState
 
 

@@ -27,6 +27,7 @@ def main():
                         help='debug mode (the more Ds, the higher the debug level)')
     opts = parser.parse_args()
 
+    dwipe = None  # Initialize to None so exception handler can reference it
     try:
         if os.geteuid() != 0:
             # Re-run the script with sudo needed and opted
@@ -40,8 +41,14 @@ def main():
 
         dwipe.main_loop()
     except Exception as exce:
-        if dwipe and dwipe.win:
-            dwipe.win.stop_curses()
+        # Try to clean up curses if it was initialized
+        try:
+            if dwipe and dwipe.win:
+                dwipe.win.stop_curses()
+        except Exception:
+            pass  # Ignore errors during cleanup
+
+        # Always print the error to ensure it's visible
         print("exception:", str(exce))
         print(traceback.format_exc())
         sys.exit(15)

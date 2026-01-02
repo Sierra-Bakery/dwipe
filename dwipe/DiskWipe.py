@@ -12,7 +12,7 @@ import time
 import shutil
 import curses as cs
 from types import SimpleNamespace
-from .ConsoleWindow import (ConsoleWindow, ConsoleWindowOpts, OptionSpinner,
+from console_window import (ConsoleWindow, ConsoleWindowOpts, OptionSpinner,
             IncrementalSearchBar, InlineConfirmation, Theme,
             Screen, ScreenStack, Context)
 
