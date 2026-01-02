@@ -11,8 +11,7 @@ from types import SimpleNamespace
 
 from .WipeJob import WipeJob
 from .Utils import Utils
-from .ConsoleWindow import (COLOR_WARNING, COLOR_INFO, COLOR_SUCCESS,
-            COLOR_OLD_SUCCESS, COLOR_HOTSWAP, COLOR_DANGER)
+from .ConsoleWindow import Theme
 from .PersistentState import PersistentState
 
 
@@ -360,31 +359,31 @@ class DeviceInfo:
             # Newly inserted device - orange/bright
             if ns.state in ('Mnt', 'Lock'):
                 # Dim the orange for mounted/locked devices
-                attr = curses.color_pair(COLOR_HOTSWAP) | curses.A_DIM
+                attr = curses.color_pair(Theme.HOTSWAP) | curses.A_DIM
             else:
-                attr = curses.color_pair(COLOR_HOTSWAP) | curses.A_BOLD
+                attr = curses.color_pair(Theme.HOTSWAP) | curses.A_BOLD
         elif ns.state == 's':
             # Yellow/warning color for stopped/partial wipes (with bold for visibility)
-            attr = curses.color_pair(COLOR_WARNING) | curses.A_BOLD
+            attr = curses.color_pair(Theme.WARNING) | curses.A_BOLD
         elif ns.state == 'W' and getattr(ns, 'wiped_this_session', False):
             # Green/success color for completed wipes (done in THIS session only) - bold and bright
-            attr = curses.color_pair(COLOR_SUCCESS) | curses.A_BOLD
+            attr = curses.color_pair(Theme.SUCCESS) | curses.A_BOLD
         elif ns.state == 'W':
             # Green/success color for completed wipes before this session
-            attr = curses.color_pair(COLOR_OLD_SUCCESS) | curses.A_BOLD
+            attr = curses.color_pair(Theme.OLD_SUCCESS) | curses.A_BOLD
         elif ns.state.endswith('%') and ns.state not in ('0%', '100%'):
             # Active wipe in progress - bright cyan/blue with bold
-            attr = curses.color_pair(COLOR_INFO) | curses.A_BOLD
+            attr = curses.color_pair(Theme.INFO) | curses.A_BOLD
         elif ns.state == '^':
             # Newly inserted device (hot-swapped) - orange/bright
-            attr = curses.color_pair(COLOR_HOTSWAP) | curses.A_BOLD
+            attr = curses.color_pair(Theme.HOTSWAP) | curses.A_BOLD
         elif ns.state in ('Mnt', 'Lock'):
             # Dim mounted or locked devices
             attr = curses.A_DIM
 
         # Override with red/danger color if verify failed
         if hasattr(ns, 'verify_failed_msg') and ns.verify_failed_msg:
-            attr = curses.color_pair(COLOR_DANGER) | curses.A_BOLD
+            attr = curses.color_pair(Theme.DANGER) | curses.A_BOLD
 
         return emit, attr
 

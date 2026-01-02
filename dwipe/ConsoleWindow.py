@@ -60,7 +60,10 @@ Example usage:
 # pylint: disable=too-many-instance-attributes,too-many-arguments
 # pylint: disable=invalid-name,broad-except,too-many-branches,global-statement
 # pylint: disable=line-too-long,too-many-statements,too-many-locals
+# pylint: disable=too-many-return-statements,too-many-nested-blocks
+# pylint: disable=multiple-statements,no-else-return
 
+import os
 import sys
 import re
 import traceback
@@ -87,177 +90,180 @@ NAVIGATION_KEYS = {
     ord('\x06'),  # Ctrl-F (page down)
 }
 
-# Semantic color pair constants (initialized in start_curses based on theme)
-COLOR_DEFAULT = 0      # Default terminal colors
-COLOR_DANGER = 1       # For destructive operations (wipe prompts)
-COLOR_SUCCESS = 2      # For completed operations
-COLOR_WARNING = 3      # For caution/stopped states
-COLOR_INFO = 4         # For informational states
-COLOR_EMPHASIS = 5     # For emphasized text
-COLOR_ERROR = 6        # For errors
-COLOR_PROGRESS = 7     # For progress indicators
-COLOR_HOTSWAP = 9      # For newly inserted devices (hot-swapped)
-COLOR_OLD_SUCCESS = 10      # For completed operations
+# Theme configuration - encapsulates all color/theme management
+class Theme:
+    """Theme and color management for ConsoleWindow"""
 
-THEMES = {
-    'dark-mono': {
-        'name': 'Dark Mono',
-        'default_fg': 253,
-        'default_bg': 232,
-        COLOR_DANGER: (196, 232),
-        COLOR_SUCCESS: (46, 232),      # Bright green
-        COLOR_OLD_SUCCESS: (22, 232),  # Dark green on almost-black
-        COLOR_WARNING: (226, 232),
-        COLOR_INFO: (51, 232),
-        COLOR_EMPHASIS: (255, 232),
-        COLOR_ERROR: (196, 232),
-        COLOR_PROGRESS: (39, 232),
-        COLOR_HOTSWAP: (208, 232),
-    },
-    'light-mono': {
-        'name': 'Light Mono',
-        'default_fg': 233,
-        'default_bg': 253,
-        COLOR_DANGER: (196, 253),
-        COLOR_SUCCESS: (28, 253),      # Darker green
-        COLOR_OLD_SUCCESS: (22, 253),  # Even darker green on almost-white
-        COLOR_WARNING: (208, 253),
-        COLOR_INFO: (25, 253),
-        COLOR_EMPHASIS: (232, 253),
-        COLOR_ERROR: (196, 253),
-        COLOR_PROGRESS: (27, 253),
-        COLOR_HOTSWAP: (166, 253),
-    },
-    'default': {
-        'name': 'Terminal Default',
-        'default_fg': -1,
-        'default_bg': -1,
-        COLOR_DANGER: (1, -1),
-        COLOR_SUCCESS: (2, -1),        # Standard green
-        COLOR_OLD_SUCCESS: (22, -1),   # Bright green (dim relative to bright)
-        COLOR_WARNING: (3, -1),
-        COLOR_INFO: (6, -1),
-        COLOR_EMPHASIS: (7, -1),
-        COLOR_ERROR: (9, -1),
-        COLOR_PROGRESS: (4, -1),
-        COLOR_HOTSWAP: (208, -1),
-    },
-    'solarized-dark': {
-        'name': 'Solarized Dark',
-        'default_fg': 244,
-        'default_bg': 234,
-        COLOR_DANGER: (160, 234),
-        COLOR_SUCCESS: (64, 234),      # Solarized green
-        COLOR_OLD_SUCCESS: (28, 234),  # Darker green on base03
-        COLOR_WARNING: (136, 234),
-        COLOR_INFO: (37, 234),
-        COLOR_EMPHASIS: (230, 234),
-        COLOR_ERROR: (196, 234),
-        COLOR_PROGRESS: (33, 234),
-        COLOR_HOTSWAP: (166, 234),
-    },
-    'solarized-light': {
-        'name': 'Solarized Light',
-        'default_fg': 240,
-        'default_bg': 230,
-        COLOR_DANGER: (160, 230),
-        COLOR_SUCCESS: (64, 230),      # Solarized green
-        COLOR_OLD_SUCCESS: (28, 230),  # Darker green on base3
-        COLOR_WARNING: (166, 230),
-        COLOR_INFO: (37, 230),
-        COLOR_EMPHASIS: (235, 230),
-        COLOR_ERROR: (196, 230),
-        COLOR_PROGRESS: (33, 230),
-        COLOR_HOTSWAP: (208, 230),
-    },
-    'gruvbox': {
-        'name': 'Gruvbox Dark',
-        'default_fg': 223,
-        'default_bg': 235,
-        COLOR_DANGER: (167, 235),
-        COLOR_SUCCESS: (142, 235),     # Gruvbox green
-        COLOR_OLD_SUCCESS: (106, 235), # Gruvbox medium green (dimmer)
-        COLOR_WARNING: (214, 235),
-        COLOR_INFO: (109, 235),
-        COLOR_EMPHASIS: (229, 235),
-        COLOR_ERROR: (203, 235),
-        COLOR_PROGRESS: (109, 235),
-        COLOR_HOTSWAP: (208, 235),
-    },
-    'nord': {
-        'name': 'Nord',
-        'default_fg': 252,
-        'default_bg': 236,
-        COLOR_DANGER: (203, 236),
-        COLOR_SUCCESS: (150, 236),     # Nord aurora green
-        COLOR_OLD_SUCCESS: (107, 236), # Nord frost green (dimmer)
-        COLOR_WARNING: (220, 236),
-        COLOR_INFO: (116, 236),
-        COLOR_EMPHASIS: (231, 236),
-        COLOR_ERROR: (203, 236),
-        COLOR_PROGRESS: (136, 236),
-        COLOR_HOTSWAP: (208, 236),
-    },
-}
-# Global theme selection (can be set via environment variable DWIPE_THEME)
-CURRENT_THEME = None  # Will be set in start_curses()
+    # Semantic color pair constants (initialized in start_curses based on theme)
+    DEFAULT = 0      # Default terminal colors
+    DANGER = 1       # For destructive operations (wipe prompts)
+    SUCCESS = 2      # For completed operations
+    WARNING = 3      # For caution/stopped states
+    INFO = 4         # For informational states
+    EMPHASIS = 5     # For emphasized text
+    ERROR = 6        # For errors
+    PROGRESS = 7     # For progress indicators
+    HOTSWAP = 9      # For newly inserted devices (hot-swapped)
+    OLD_SUCCESS = 10 # For completed operations (dimmer)
 
+    # Current theme name (set in start_curses)
+    _current = None
 
-def get_current_theme():
-    """Get the name of the currently active color theme."""
-    return CURRENT_THEME
+    # Available themes
+    THEMES = {
+        'dark-mono': {
+            'name': 'Dark Mono',
+            'default_fg': 253,
+            'default_bg': 232,
+            1: (196, 232),  # DANGER
+            2: (46, 232),   # SUCCESS - Bright green
+            10: (28, 232),  # OLD_SUCCESS - Medium green, darker than SUCCESS but not too dark
+            3: (226, 232),  # WARNING
+            4: (51, 232),   # INFO
+            5: (255, 232),  # EMPHASIS
+            6: (196, 232),  # ERROR
+            7: (39, 232),   # PROGRESS
+            9: (208, 232),  # HOTSWAP
+        },
+        'light-mono': {
+            'name': 'Light Mono',
+            'default_fg': 233,
+            'default_bg': 253,
+            1: (196, 253),  # DANGER
+            2: (34, 253),   # SUCCESS - Bright visible green on light background
+            10: (22, 253),  # OLD_SUCCESS - Darker muted green, clearly darker than SUCCESS
+            3: (208, 253),  # WARNING
+            4: (25, 253),   # INFO
+            5: (232, 253),  # EMPHASIS
+            6: (196, 253),  # ERROR
+            7: (27, 253),   # PROGRESS
+            9: (166, 253),  # HOTSWAP
+        },
+        'default': {
+            'name': 'Terminal Default',
+            'default_fg': -1,
+            'default_bg': -1,
+            1: (1, -1),   # DANGER
+            2: (2, -1),   # SUCCESS - Standard green
+            10: (28, -1), # OLD_SUCCESS - Medium green, dimmer than bright SUCCESS
+            3: (3, -1),   # WARNING
+            4: (6, -1),   # INFO
+            5: (7, -1),   # EMPHASIS
+            6: (9, -1),   # ERROR
+            7: (4, -1),   # PROGRESS
+            9: (208, -1), # HOTSWAP
+        },
+        'solarized-dark': {
+            'name': 'Solarized Dark',
+            'default_fg': 244,
+            'default_bg': 234,
+            1: (160, 234),  # DANGER
+            2: (70, 234),   # SUCCESS - Brighter solarized green, clearly bright
+            10: (28, 234),  # OLD_SUCCESS - Darker muted green, clearly dimmer than SUCCESS
+            3: (136, 234),  # WARNING
+            4: (37, 234),   # INFO
+            5: (230, 234),  # EMPHASIS
+            6: (196, 234),  # ERROR
+            7: (33, 234),   # PROGRESS
+            9: (166, 234),  # HOTSWAP
+        },
+        'solarized-light': {
+            'name': 'Solarized Light',
+            'default_fg': 240,
+            'default_bg': 230,
+            1: (160, 230),  # DANGER
+            2: (70, 230),   # SUCCESS - Brighter solarized green, clearly bright
+            10: (28, 230),  # OLD_SUCCESS - Darker muted green, clearly dimmer than SUCCESS
+            3: (166, 230),  # WARNING
+            4: (37, 230),   # INFO
+            5: (235, 230),  # EMPHASIS
+            6: (196, 230),  # ERROR
+            7: (33, 230),   # PROGRESS
+            9: (208, 230),  # HOTSWAP
+        },
+        'gruvbox': {
+            'name': 'Gruvbox Dark',
+            'default_fg': 223,
+            'default_bg': 235,
+            1: (167, 235),  # DANGER
+            2: (142, 235),  # SUCCESS - Gruvbox green
+            10: (106, 235), # OLD_SUCCESS - Gruvbox medium green (dimmer)
+            3: (214, 235),  # WARNING
+            4: (109, 235),  # INFO
+            5: (229, 235),  # EMPHASIS
+            6: (203, 235),  # ERROR
+            7: (109, 235),  # PROGRESS
+            9: (208, 235),  # HOTSWAP
+        },
+        'nord': {
+            'name': 'Nord',
+            'default_fg': 252,
+            'default_bg': 236,
+            1: (203, 236),  # DANGER
+            2: (150, 236),  # SUCCESS - Nord aurora green, bright
+            10: (114, 236), # OLD_SUCCESS - Nord frost green (dimmer), darker but not too dark
+            3: (220, 236),  # WARNING
+            4: (116, 236),  # INFO
+            5: (231, 236),  # EMPHASIS
+            6: (203, 236),  # ERROR
+            7: (136, 236),  # PROGRESS
+            9: (208, 236),  # HOTSWAP
+        },
+    }
 
+    @classmethod
+    def get_current(cls):
+        """Get the name of the currently active color theme."""
+        return cls._current
 
-def list_themes():
-    """List all available color themes."""
-    return list(THEMES.keys())
+    @classmethod
+    def list_all(cls):
+        """List all available color themes."""
+        return list(cls.THEMES.keys())
 
+    @classmethod
+    def set(cls, theme_name):
+        """Change the current theme and reinitialize color pairs.
 
-def set_theme(theme_name):
-    """Change the current theme and reinitialize color pairs.
+        Args:
+            theme_name: Name of theme from THEMES dict
 
-    Args:
-        theme_name: Name of theme from THEMES dict
+        Returns:
+            bool: True if theme was set, False if invalid theme or colors not supported
+        """
+        if theme_name not in cls.THEMES:
+            return False
 
-    Returns:
-        bool: True if theme was set, False if invalid theme or colors not supported
-    """
-    global CURRENT_THEME
-    import os
+        if not curses.has_colors():
+            return False
 
-    if theme_name not in THEMES:
-        return False
+        cls._current = theme_name
+        # Update environment variable so it persists for session
+        os.environ['DWIPE_THEME'] = theme_name
+        theme = cls.THEMES[theme_name]
 
-    if not curses.has_colors():
-        return False
+        # Set terminal background and foreground from theme
+        if 'default_fg' in theme and 'default_bg' in theme:
+            default_fg = theme['default_fg']
+            default_bg = theme['default_bg']
+            # Always update the default color pair and screen background
+            # (even when -1, -1 to reset to terminal defaults)
+            curses.init_pair(8, default_fg, default_bg)
+            if ConsoleWindow.static_scr:
+                ConsoleWindow.static_scr.bkgd(' ', curses.color_pair(8))
+            # Also update pads if window exists
+            if ConsoleWindow.static_win:
+                ConsoleWindow.static_win.head.pad.bkgd(' ', curses.color_pair(8))
+                ConsoleWindow.static_win.body.pad.bkgd(' ', curses.color_pair(8))
 
-    CURRENT_THEME = theme_name
-    # Update environment variable so it persists for session
-    os.environ['DWIPE_THEME'] = theme_name
-    theme = THEMES[theme_name]
+        # Reinitialize color pairs with new theme
+        for color_id in [cls.DANGER, cls.SUCCESS, cls.OLD_SUCCESS, cls.WARNING,
+                       cls.INFO, cls.EMPHASIS, cls.ERROR, cls.PROGRESS, cls.HOTSWAP]:
+            if color_id in theme:
+                fg, bg = theme[color_id]
+                curses.init_pair(color_id, fg, bg)
 
-    # Set terminal background and foreground from theme
-    if 'default_fg' in theme and 'default_bg' in theme:
-        default_fg = theme['default_fg']
-        default_bg = theme['default_bg']
-        # Always update the default color pair and screen background
-        # (even when -1, -1 to reset to terminal defaults)
-        curses.init_pair(8, default_fg, default_bg)
-        if ConsoleWindow.static_scr:
-            ConsoleWindow.static_scr.bkgd(' ', curses.color_pair(8))
-        # Also update pads if window exists
-        if ConsoleWindow.static_win:
-            ConsoleWindow.static_win.head.pad.bkgd(' ', curses.color_pair(8))
-            ConsoleWindow.static_win.body.pad.bkgd(' ', curses.color_pair(8))
-
-    # Reinitialize color pairs with new theme
-    for color_id in [COLOR_DANGER, COLOR_SUCCESS, COLOR_OLD_SUCCESS, COLOR_WARNING,
-                   COLOR_INFO, COLOR_EMPHASIS, COLOR_ERROR, COLOR_PROGRESS, COLOR_HOTSWAP]:
-        if color_id in theme:
-            fg, bg = theme[color_id]
-            curses.init_pair(color_id, fg, bg)
-
-    return True
+        return True
 
 
 class Context:
@@ -404,6 +410,72 @@ def restore_ctrl_c():
     Called upon curses shutdown.
     """
     signal.signal(signal.SIGINT, signal.default_int_handler)
+
+
+class InlineConfirmation:
+    """Manages inline confirmation prompts for wipe/verify operations"""
+
+    def __init__(self):
+        self.active = False
+        self.confirm_type = None  # 'wipe' or 'verify'
+        self.partition_name = None
+        self.input_buffer = ''
+        self.mode = None  # 'Y', 'y', 'YES', 'yes', 'device'
+
+    def start(self, confirm_type, partition_name, mode):
+        """Start a confirmation prompt"""
+        self.active = True
+        self.confirm_type = confirm_type
+        self.partition_name = partition_name
+        self.input_buffer = ''
+        self.mode = mode
+
+    def cancel(self):
+        """Cancel the confirmation"""
+        self.active = False
+        self.confirm_type = None
+        self.partition_name = None
+        self.input_buffer = ''
+
+    def get_expected(self):
+        """Get the expected input string"""
+        if self.mode == 'device':
+            return self.partition_name
+        return self.mode
+
+    def is_single_key(self):
+        """Check if this mode uses single key confirmation"""
+        return self.mode in ('Y', 'y')
+
+    def handle_key(self, key):
+        """Handle a key press during confirmation.
+
+        Returns:
+            'confirmed' - user confirmed
+            'cancelled' - user cancelled (ESC)
+            'continue' - still gathering input
+        """
+        if key == 27:  # ESC
+            return 'cancelled'
+
+        if self.is_single_key():
+            # Single key confirmation
+            expected = self.get_expected()
+            if key == ord(expected):
+                return 'confirmed'
+            return 'continue'
+
+        # Typed confirmation
+        if 32 <= key <= 126:  # Printable ASCII
+            self.input_buffer += chr(key)
+        elif key in (curses.KEY_BACKSPACE, 127, 8):  # Backspace
+            self.input_buffer = self.input_buffer[:-1]
+        elif key in (curses.KEY_ENTER, 10):  # ENTER
+            if self.input_buffer == self.get_expected():
+                return 'confirmed'
+            # Wrong input - reset
+            self.input_buffer = ''
+        return 'continue'
 
 
 class IncrementalSearchBar:
@@ -1087,7 +1159,7 @@ class ConsoleWindow:
 
         # Apply theme background to pads
         if curses.has_colors():
-            theme = THEMES.get(CURRENT_THEME, THEMES['default'])
+            theme = Theme.THEMES.get(Theme.CURRENT_THEME, Theme.THEMES['default'])
             if 'default_fg' in theme and 'default_bg' in theme:
                 default_fg = theme['default_fg']
                 default_bg = theme['default_bg']
@@ -1384,17 +1456,16 @@ class ConsoleWindow:
 
         # Initialize color support with theme
         if curses.has_colors():
-            global CURRENT_THEME
+            # global Theme.CURRENT_THEME
             curses.start_color()
             curses.use_default_colors()  # Allow -1 for default terminal colors
 
             # Select theme from environment variable or default
-            import os
             theme_name = os.environ.get('DWIPE_THEME', 'default')
-            if theme_name not in THEMES:
+            if theme_name not in Theme.THEMES:
                 theme_name = 'default'
-            CURRENT_THEME = theme_name
-            theme = THEMES[theme_name]
+            Theme.CURRENT_THEME = theme_name
+            theme = Theme.THEMES[theme_name]
 
             # Set terminal background and foreground from theme
             if 'default_fg' in theme and 'default_bg' in theme:
@@ -1408,8 +1479,8 @@ class ConsoleWindow:
                     scr.bkgd(' ', curses.color_pair(8))
 
             # Initialize semantic color pairs based on selected theme
-            for color_id in [COLOR_DANGER, COLOR_SUCCESS, COLOR_WARNING,
-                           COLOR_INFO, COLOR_EMPHASIS, COLOR_ERROR, COLOR_PROGRESS, COLOR_HOTSWAP]:
+            for color_id in [Theme.DANGER, Theme.SUCCESS, Theme.WARNING,
+                           Theme.INFO, Theme.EMPHASIS, Theme.ERROR, Theme.PROGRESS, Theme.HOTSWAP]:
                 if color_id in theme:
                     fg, bg = theme[color_id]
                     curses.init_pair(color_id, fg, bg)
@@ -2255,7 +2326,7 @@ class ConsoleWindow:
         input_string = list(seed)
         cursor_pos = len(input_string)
         v_scroll_top = 0
-        last_esc_time = None  # For ESC-ESC tracking 
+        last_esc_time = None  # For ESC-ESC tracking
 
         def calculate_geometry(self):
             # ... (Geometry calculation logic remains the same) ...
@@ -2291,7 +2362,7 @@ class ConsoleWindow:
         while True:
             try:
                 success, row0, row9, col0, text_win_width = calculate_geometry(self)
-                
+
                 # --- RESIZE/TOO SMALL CHECK ---
                 if not success:
                     min_cols, min_rows = self.opts.min_cols_rows
@@ -2346,14 +2417,14 @@ class ConsoleWindow:
                 total_wrapped_lines = (len(input_string) + text_win_width - 1) // text_win_width
                 if len(input_string) == 0:
                     total_wrapped_lines = 1
-                
+
                 # Display the visible lines
                 for r in range(height):
                     current_wrapped_line_idx = v_scroll_top + r
-                    
+
                     start_char_idx = current_wrapped_line_idx * text_win_width
                     end_char_idx = start_char_idx + text_win_width
-                    
+
                     if start_char_idx > len(input_string) and r > 0:
                         break
 
@@ -2362,32 +2433,32 @@ class ConsoleWindow:
                     current_h_scroll_start = 0
 
                     is_cursor_line = (current_wrapped_line_idx == wrapped_line_idx)
-                    
+
                     if is_cursor_line:
                         line_to_display = raw_wrapped_line[h_scroll_start:]
                         current_h_scroll_start = h_scroll_start
-                        
+
                     # 1. Clear the content area (important for redraw integrity)
                     self.scr.addstr(row0 + 1 + r, col0 + 1, ' ' * text_win_width)
                     # 2. Display the text
                     self.scr.addstr(row0 + 1 + r, col0 + 1, line_to_display[:text_win_width])
-                    
+
                     # --- SCROLL INDICATOR LOGIC ---
                     if is_cursor_line:
-                        left_indicator = curses.ACS_VLINE 
+                        left_indicator = curses.ACS_VLINE
                         right_indicator = curses.ACS_VLINE
-                        
+
                         # Left Indicator Check
                         if current_h_scroll_start > 0:
                             # If content is scrolled right, show '<'
-                            left_indicator = ord('<') 
+                            left_indicator = ord('<')
 
                         # Right Indicator Check
                         full_line_len = len(raw_wrapped_line)
                         if full_line_len > current_h_scroll_start + text_win_width:
                             # If there's more content to the right, show '>'
-                            right_indicator = ord('>') 
-                        
+                            right_indicator = ord('>')
+
                         # Draw Indicators (overwrite the border's vertical line)
                         self.scr.addch(row0 + 1 + r, col0, left_indicator)
                         self.scr.addch(row0 + 1 + r, col0 + text_win_width + 1, right_indicator)
@@ -2457,7 +2528,7 @@ class ConsoleWindow:
                             return None  # Double ESC within timeout
                         last_esc_time = current_time
                         # Single ESC - just update time and continue
-                
+
                 elif key == curses.KEY_UP:
                     target_pos = cursor_pos - text_win_width
                     cursor_pos = max(0, target_pos)
@@ -2465,7 +2536,7 @@ class ConsoleWindow:
                 elif key == curses.KEY_DOWN:
                     target_pos = cursor_pos + text_win_width
                     cursor_pos = min(len(input_string), target_pos)
-                        
+
                 # ... [KEY_LEFT, KEY_RIGHT, HOME, END, edits, ASCII] ...
                 elif key == curses.KEY_LEFT: cursor_pos = max(0, cursor_pos - 1)
                 elif key == curses.KEY_RIGHT: cursor_pos = min(len(input_string), cursor_pos + 1)
@@ -2496,12 +2567,12 @@ class ConsoleWindow:
                 elif 32 <= key <= 126:
                     input_string.insert(cursor_pos, chr(key))
                     cursor_pos += 1
-                
+
                 # --- Explicit Resize Handler ---
                 elif key == curses.KEY_RESIZE:
                     curses.update_lines_cols()
                     continue
-                    
+
             except curses.error:
                 # Catch exceptions from drawing outside bounds during resize
                 self.scr.clear()

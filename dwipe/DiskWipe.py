@@ -13,11 +13,8 @@ import shutil
 import curses as cs
 from types import SimpleNamespace
 from .ConsoleWindow import (ConsoleWindow, ConsoleWindowOpts, OptionSpinner,
-            IncrementalSearchBar,
-            COLOR_DANGER, COLOR_SUCCESS, COLOR_OLD_SUCCESS,
-            COLOR_WARNING, COLOR_INFO, COLOR_EMPHASIS, COLOR_ERROR, COLOR_PROGRESS, COLOR_HOTSWAP,
-            list_themes, get_current_theme, set_theme,
-            Screen, ScreenStack, THEMES, Context)
+            IncrementalSearchBar, InlineConfirmation, Theme,
+            Screen, ScreenStack, Context)
 
 from .WipeJob import WipeJob
 from .DeviceInfo import DeviceInfo
@@ -30,72 +27,6 @@ HELP_ST = 1
 LOG_ST = 2
 THEME_ST = 3
 SCREEN_NAMES = ('MAIN', 'HELP', 'HISTORY', 'THEMES')
-
-
-class InlineConfirmation:
-    """Manages inline confirmation prompts for wipe/verify operations"""
-
-    def __init__(self):
-        self.active = False
-        self.confirm_type = None  # 'wipe' or 'verify'
-        self.partition_name = None
-        self.input_buffer = ''
-        self.mode = None  # 'Y', 'y', 'YES', 'yes', 'device'
-
-    def start(self, confirm_type, partition_name, mode):
-        """Start a confirmation prompt"""
-        self.active = True
-        self.confirm_type = confirm_type
-        self.partition_name = partition_name
-        self.input_buffer = ''
-        self.mode = mode
-
-    def cancel(self):
-        """Cancel the confirmation"""
-        self.active = False
-        self.confirm_type = None
-        self.partition_name = None
-        self.input_buffer = ''
-
-    def get_expected(self):
-        """Get the expected input string"""
-        if self.mode == 'device':
-            return self.partition_name
-        return self.mode
-
-    def is_single_key(self):
-        """Check if this mode uses single key confirmation"""
-        return self.mode in ('Y', 'y')
-
-    def handle_key(self, key):
-        """Handle a key press during confirmation.
-
-        Returns:
-            'confirmed' - user confirmed
-            'cancelled' - user cancelled (ESC)
-            'continue' - still gathering input
-        """
-        if key == 27:  # ESC
-            return 'cancelled'
-
-        if self.is_single_key():
-            # Single key confirmation
-            expected = self.get_expected()
-            if key == ord(expected):
-                return 'confirmed'
-            return 'continue'
-
-        # Typed confirmation
-        if 32 <= key <= 126:  # Printable ASCII
-            self.input_buffer += chr(key)
-        elif key in (cs.KEY_BACKSPACE, 127, 8):  # Backspace
-            self.input_buffer = self.input_buffer[:-1]
-        elif key in (cs.KEY_ENTER, 10):  # ENTER
-            if self.input_buffer == self.get_expected():
-                return 'confirmed'
-            # Wrong input - reset
-            self.input_buffer = ''
-        return 'continue'
 
 
 class DiskWipe:
@@ -385,11 +316,11 @@ class DiskWipe:
         spin.add_key('history', 'h - show wipe history', genre='action')
         spin.add_key('filter', '/ - filter devices by regex', genre='action')
         spin.add_key('theme_screen', 't - theme picker', genre='action', scope=MAIN_ST)
-        spin.add_key('spin_theme', 't - theme', genre='action', scope=THEME_ST); # vals=list_themes())
+        spin.add_key('spin_theme', 't - theme', genre='action', scope=THEME_ST)
         spin.add_key('header_mode', '_ - header style', vals=['Underline', 'Reverse', 'Off'])
         self.opts.theme = ''
         self.persistent_state.restore_updated_opts(self.opts)
-        set_theme(self.opts.theme)
+        Theme.set(self.opts.theme)
         self.win.set_handled_keys(self.spin.keys)
 
 
@@ -706,7 +637,7 @@ class MainScreen(DiskWipeScreen):
                 msg = ' ' * 20 + msg
 
                 # Add confirmation message as DECOR (non-pickable)
-                app.win.add_body(msg, attr=cs.color_pair(COLOR_DANGER) | cs.A_BOLD,
+                app.win.add_body(msg, attr=cs.color_pair(Theme.DANGER) | cs.A_BOLD,
                                context=Context(genre='DECOR'))
 
         app.win.add_fancy_header(app.get_keys_line(), mode=app.opts.header_mode)
@@ -917,19 +848,19 @@ class ThemeScreen(DiskWipeScreen):
 
         # Color purpose labels
         color_labels = [
-            (COLOR_DANGER, 'DANGER', 'Destructive operations (wipe prompts)'),
-            (COLOR_SUCCESS, 'SUCCESS', 'Completed operations'),
-            (COLOR_OLD_SUCCESS, 'OLD_SUCCESS', 'Older Completed operations'),
-            (COLOR_WARNING, 'WARNING', 'Caution/stopped states'),
-            (COLOR_INFO, 'INFO', 'Informational states'),
-            (COLOR_EMPHASIS, 'EMPHASIS', 'Emphasized text'),
-            (COLOR_ERROR, 'ERROR', 'Errors'),
-            (COLOR_PROGRESS, 'PROGRESS', 'Progress indicators'),
-            (COLOR_HOTSWAP, 'HOTSWAP', 'Newly inserted devices'),
+            (Theme.DANGER, 'DANGER', 'Destructive operations (wipe prompts)'),
+            (Theme.SUCCESS, 'SUCCESS', 'Completed operations'),
+            (Theme.OLD_SUCCESS, 'OLD_SUCCESS', 'Older Completed operations'),
+            (Theme.WARNING, 'WARNING', 'Caution/stopped states'),
+            (Theme.INFO, 'INFO', 'Informational states'),
+            (Theme.EMPHASIS, 'EMPHASIS', 'Emphasized text'),
+            (Theme.ERROR, 'ERROR', 'Errors'),
+            (Theme.PROGRESS, 'PROGRESS', 'Progress indicators'),
+            (Theme.HOTSWAP, 'HOTSWAP', 'Newly inserted devices'),
         ]
 
         # Display color examples for current theme
-        theme_info = THEMES[app.opts.theme]
+        theme_info = Theme.THEMES[app.opts.theme]
         _ = theme_info.get('name', app.opts.theme)
 
         # Show color examples for this theme
@@ -941,9 +872,9 @@ class ThemeScreen(DiskWipeScreen):
             
     def spin_theme_ACTION(self):
         """ TBD """
-        vals = list_themes()
-        value = get_current_theme()
+        vals = Theme.list_all()
+        value = Theme.get_current()
         idx = vals.index(value) if value in vals else -1
         value = vals[(idx+1) % len(vals)] # choose next
-        set_theme(value)
+        Theme.set(value)
         self.app.opts.theme = value

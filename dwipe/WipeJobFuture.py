@@ -1,6 +1,14 @@
-clase WipeJobFuture:
+"""
+Docstring for dwipe.WipeJobFuture.  Probably, only winners here are:
+- Detailed Status Dict - Returns structured status.
+        Low risk but not urgent since current status works fine.
+- Custom Pattern Sequences - Adds 0xFF pattern support.
+        Low risk but adds complexity.
+"""
+
+class MaybeSomeDay:
     def __init__(self, device_path, total_size, opts=None, resume_from=0, resume_mode=None):
-    """ Performance Throttling """
+        """ Performance Throttling """
         # ... existing initialization ...
 
         # Performance throttling
@@ -43,44 +51,6 @@ clase WipeJobFuture:
             sleep_time = target_time - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
-
-
-
-    def _check_for_stall(self):
-        """Check if write progress has stalled"""
-        if self.stall_timeout <= 0:
-            return False
-        
-        now = time.monotonic()
-        time_since_progress = now - self.last_progress_time
-        
-        if time_since_progress > self.stall_timeout:
-            # Stall detected - try recovery
-            self._handle_stall_recovery()
-            return True
-        
-        return False
-
-    def _handle_stall_recovery(self):
-        """Attempt to recover from a stalled write"""
-        try:
-            # 1. Try reducing write size
-            if self.adaptive_block_size and self.current_write_size > WipeJob.BLOCK_SIZE:
-                self.current_write_size = max(WipeJob.BLOCK_SIZE, self.current_write_size // 2)
-                print(f"Stall detected: Reduced write size to {self.current_write_size // 1024}KB")
-            
-            # 2. Try sync/flush
-            os.sync()
-            
-            # 3. Reset stall timer
-            self.last_progress_time = time.monotonic()
-            self.last_progress_bytes = self.total_written
-            
-        except Exception:
-            pass
-
-
-
 
 
 
@@ -196,14 +166,6 @@ clase WipeJobFuture:
 
 
 
-
-
-
-
-
-
-
-
     def get_detailed_status(self):
         """Get detailed status including speed, ETA, and health metrics"""
         elapsed, pct_str, rate_str, eta_str = self.get_status()
@@ -230,9 +192,6 @@ clase WipeJobFuture:
             status['max_speed_mbps'] = self.max_speed_mbps
 
         return status
-
-
-
 
 
 
