@@ -44,6 +44,9 @@
 * **Direct I/O to Disk** - Wiping is done with direct I/O which is fast and avoid polluting your page cache. Writer threads are given lower than normal I/O priority to play nice with other apps.  This makes stopping jobs fast and certain.
 * **Improved Handling of Bad Disks.** Now detects (sometimes corrects) write failures, slowdowns, excessive no progress, and reports/aborts hopeless or hopelessly slow wipes.
 
+## **V2.x Features**
+Features added since V2 deployed (may not be in latest demo):
+* **Port and Serial number**.  Press `p` to toggle whether port and serial number is show; it adds another line per disk and you may want to use it selectively.
 ## Requirements
 - **Linux operating system** (uses `/dev/`, `/sys/`, `/proc/` interfaces)
 - **Python 3.8 or higher**

@@ -1,6 +1,8 @@
 """
 DeviceInfo class for device discovery and information management
 """
+import os
+import re
 import json
 import subprocess
 import time
@@ -36,6 +38,7 @@ class DeviceInfo:
                                dflt=dflt,         # default run-time state
                                label='',       # blkid
                                fstype='',      # blkid
+                               type='',        # device type (disk, part)
                                model='',       # /sys/class/block/{name}/device/vendor|model
                                size_bytes=size_bytes,  # /sys/block/{name}/...
                                marker='',      #  persistent status
@@ -45,7 +48,56 @@ class DeviceInfo:
                                job=None,         # if zap running
                                uuid='',        # filesystem UUID or PARTUUID
                                serial='',      # disk serial number (for whole disks)
+                               port='',        # port (for whole disks)
                                )
+
+    def _get_port_from_sysfs(self, device_name):
+        try:
+            sysfs_path = f'/sys/class/block/{device_name}'
+            if not os.path.exists(sysfs_path):
+                return ''
+
+            real_path = os.path.realpath(sysfs_path).lower()
+
+            # 1. USB - Format: USB:1-1.4
+            if '/usb' in real_path:
+                usb_match = re.search(r'/(\d+-\d+(?:\.\d+)*):', real_path)
+                if usb_match:
+                    return f"USB:{usb_match.group(1)}"
+
+            # 2. SATA - Format: SATA:1
+            elif '/ata' in real_path:
+                ata_match = re.search(r'ata(\d+)', real_path)
+                if ata_match:
+                    return f"SATA:{ata_match.group(1)}"
+
+            # 3. NVMe - Format: PCI:1b.0 (Stripped of 0000:00: noise)
+            elif '/nvme' in real_path:
+                # This regex ignores the 4-digit domain and the first 2-digit bus
+                pci_match = re.search(r'0000:[0-9a-f]{2}:([0-9a-f]{2}\.[0-9a-f])', real_path)
+                if pci_match:
+                    return f"PCI:{pci_match.group(1)}"
+                return "NVMe"
+
+            # 4. MMC/eMMC - Format: MMC:0 or PCI:1a.0 (if PCI-attached)
+            elif '/mmc' in real_path:
+                # Try to extract mmc host number
+                mmc_match = re.search(r'/mmc_host/mmc(\d+)', real_path)
+                if mmc_match:
+                    return f"MMC:{mmc_match.group(1)}"
+                # Fallback: try to get PCI address if available
+                pci_match = re.search(r'0000:[0-9a-f]{2}:([0-9a-f]{2}\.[0-9a-f])', real_path)
+                if pci_match:
+                    return f"PCI:{pci_match.group(1)}"
+                return "MMC"
+
+        except Exception as e:
+            # Log exception to file for debugging
+            with open('/tmp/dwipe_port_debug.log', 'a', encoding='utf-8') as f:
+                import traceback
+                f.write(f"Exception in _get_port_from_sysfs({device_name}): {e}\n")
+                traceback.print_exc(file=f)
+        return ''
 
     @staticmethod
     def get_device_vendor_model(device_name):
@@ -156,19 +208,50 @@ class DeviceInfo:
         # Parse each block device and its properties
         for device in parsed_data['blockdevices']:
             parent = eat_one(device)
-            parent.fstype = self.get_device_vendor_model(parent.name)
             entries[parent.name] = parent
             for child in device.get('children', []):
                 entry = eat_one(child)
                 entries[entry.name] = entry
                 entry.parent = parent.name
                 parent.minors.append(entry.name)
-                if not parent.fstype:
-                    parent.fstype = 'DISK'
                 self.disk_majors.add(entry.major)
                 if entry.mounts:
                     entry.state = 'Mnt'
                     parent.state = 'Mnt'
+
+
+        # Final pass: Identify disks, assign ports, and handle superfloppies
+        final_entries = {}
+        for name, entry in entries.items():
+            final_entries[name] = entry
+            
+            # Only process top-level physical disks
+            if entry.parent is None:
+                # Hardware Info Gathering
+                entry.model = self.get_device_vendor_model(entry.name)
+                entry.port = self._get_port_from_sysfs(entry.name)
+                
+                # The Split (Superfloppy Case)
+                # If it has children, the children already hold the data.
+                # If it has NO children but HAS data, we create the '----' child.
+                if not entry.minors and (entry.fstype or entry.label or entry.mounts):
+                    v_key = f"{name}_data"
+                    v_child = self._make_partition_namespace(entry.major, name, entry.size_bytes, dflt)
+                    v_child.name = "----"
+                    v_child.fstype = entry.fstype
+                    v_child.label = entry.label
+                    v_child.mounts = entry.mounts
+                    v_child.parent = name
+                    
+                    # Clean the hardware row of data-specific strings
+                    entry.fstype = entry.model if entry.model else 'DISK'
+                    entry.label = ''
+                    entry.mounts = []
+
+                    final_entries[v_key] = v_child
+                    entry.minors.append(v_key)
+
+        entries = final_entries
 
         if self.DB:
             print('\n\nDB: --->>> after parse_lsblk:')
@@ -237,21 +320,38 @@ class DeviceInfo:
             DeviceInfo.set_one_state(nss, ns)
 
     def get_disk_partitions(self, nss):
-        """Filter out virtual/pseudo devices (zram, loop, etc.) while keeping physical drives.
-        Keeps: sd*, nvme*, vd*, hd*, mmcblk* (physical and USB drives)
-        Excludes: zram*, loop*, dm-*, sr*, ram*
-        """
-        # Virtual/pseudo device prefixes to exclude
-        exclude_prefixes = ('zram', 'loop', 'dm-', 'sr', 'ram')
+        """Filter to only wipeable physical storage using positive criteria.
 
+        Keeps devices that:
+        - Are type 'disk' or 'part' (from lsblk)
+        - Are writable (not read-only)
+        - Are real block devices (not virtual)
+
+        This automatically excludes:
+        - Virtual devices (zram, loop, dm-*, etc.)
+        - Read-only devices (CD-ROMs, eMMC boot partitions)
+        - Special partitions (boot loaders)
+        """
         ok_nss = {}
         for name, ns in nss.items():
             # Must be disk or partition type
             if ns.type not in ('disk', 'part'):
                 continue
 
-            # Exclude virtual/pseudo devices by name prefix
-            if any(name.startswith(prefix) for prefix in exclude_prefixes):
+            # Must be writable (excludes CD-ROMs, eMMC boot partitions, etc.)
+            ro_path = f'/sys/class/block/{name}/ro'
+            try:
+                with open(ro_path, 'r', encoding='utf-8') as f:
+                    if f.read().strip() != '0':
+                        continue  # Skip read-only devices
+            except (FileNotFoundError, Exception):
+                # If we can't read ro flag, skip this device to be safe
+                continue
+
+            # Exclude common virtual device prefixes as a safety net
+            # (most should already be filtered by ro check or missing sysfs)
+            virtual_prefixes = ('zram', 'loop', 'dm-', 'ram')
+            if any(name.startswith(prefix) for prefix in virtual_prefixes):
                 continue
 
             # Include this device
@@ -405,6 +505,7 @@ class DeviceInfo:
             if new_ns:
                 if prev_ns.job:
                     new_ns.job = prev_ns.job
+                # Note: Do NOT preserve port - use fresh value from current scan
                 new_ns.dflt = prev_ns.dflt
                 # Preserve the "wiped this session" flag
                 if hasattr(prev_ns, 'wiped_this_session'):

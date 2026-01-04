@@ -187,6 +187,7 @@ class DiskWipe:
         line += f' [P]ass={self.opts.passes}'
         # Show verification percentage spinner with key
         line += f' [V]pct={self.opts.verify_pct}%'
+        line += f' [p]ort'
         line += '  '
         if self.opts.dry_run:
             line += ' DRY-RUN'
@@ -295,6 +296,7 @@ class DiskWipe:
         spin = self.spin = OptionSpinner(stack=self.stack)
         spin.default_obj = self.opts
         spin.add_key('dense', 'D - dense/spaced view', vals=[False, True])
+        spin.add_key('port_serial', 'p - disk port info', vals=[False, True])
         spin.add_key('slowdown_stop', 'L - stop if disk slows Nx', vals=[16, 64, 256, 0, 4])
         spin.add_key('stall_timeout', 'T - stall timeout (sec)', vals=[60, 120, 300, 600, 0,])
         spin.add_key('verify_pct', 'V - verification %', vals=[0, 2, 5, 10, 25, 50, 100])
@@ -372,6 +374,11 @@ class DiskWipeScreen(Screen):
 class MainScreen(DiskWipeScreen):
     """Main device list screen"""
 
+    def _port_serial_line(self, port, serial):
+        wids = self.app.wids
+        wid = wids.state if wids else 5
+        sep = '  '
+        return f'{"":>{wid}}{sep}│   └────── {port:<12} {serial}'
 
     def draw_screen(self):
         """Draw the main device list"""
@@ -612,6 +619,9 @@ class MainScreen(DiskWipeScreen):
             ctx = Context(genre='disk' if partition.parent is None else 'partition',
                          partition=partition)
             app.win.add_body(partition.line, attr=attr, context=ctx)
+            if partition.parent is None and app.opts.port_serial:
+                line = self._port_serial_line(partition.port, partition.serial)
+                app.win.add_body(line, attr=attr, context=Context(genre='DECOR'))
 
             # Show inline confirmation prompt if this is the partition being confirmed
             if app.confirmation.active and app.confirmation.partition_name == partition.name:

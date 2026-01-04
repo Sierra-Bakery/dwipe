@@ -25,12 +25,13 @@ class PersistentState:
         self.state = {
             'theme': 'default',
             'wipe_mode': 'Zero',  # 'Rand' or 'Zero' or +V
-            'passes': 1,  # 1, 2, or 4 wipe passes
+            'passes': 1,  # 1, 2, or 4 wipe pass
             'confirmation': 'YES',  # 'Y', 'y', 'YES', 'yes', 'device'
             'verify_pct': 2,  # 0, 2, 5, 10, 25, 50, 100
             'dense': False,  # True = compact view, False = blank lines between disks
             'slowdown_stop': 16,
             'stall_timeout': 60,
+            'port_serial': False,
             'devices': {}  # device_id -> {locked, last_seen, last_name, size_bytes}
         }
         self.dirty = False
@@ -61,15 +62,6 @@ class PersistentState:
             try:
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
-                    # Migrate old mode values to new format
-#                   if 'mode' in loaded:
-#                       old_mode = loaded['mode']
-#                       if old_mode in ('random', 'Random', 'RANDOM'):
-#                           loaded['mode'] = 'Rand'
-#                           self.dirty = True  # Save migrated value
-#                       elif old_mode in ('zero', 'zeros', 'Zero', 'ZERO'):
-#                           loaded['mode'] = 'Zero'
-#                           self.dirty = True  # Save migrated value
                     self.state.update(loaded)
             except (json.JSONDecodeError, IOError) as e:
                 print(f'Warning: Could not load state from {self.config_path}: {e}')
