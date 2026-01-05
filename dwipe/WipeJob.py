@@ -273,6 +273,7 @@ class WipeJob:
             verify_pct = 2  # Default to 2% if not set
 
         # Initialize verify state BEFORE starting thread to avoid showing "0%"
+        # This is now miiiiiiiine
         job.verify_pct = verify_pct
         job.verify_start_mono = time.monotonic()
         job.verify_progress = 0
